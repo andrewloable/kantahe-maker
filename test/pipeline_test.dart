@@ -6,6 +6,8 @@ import 'package:kantahe_maker/pipeline.dart';
 import 'package:kantahe_maker/tool_pins.dart';
 import 'package:kantahe_maker/tools.dart';
 
+import 'support/windows_safe.dart';
+
 /// True if [seq] appears in [list] as consecutive elements.
 bool hasSeq(List<String> list, List<String> seq) {
   for (var i = 0; i + seq.length <= list.length; i++) {
@@ -38,8 +40,11 @@ void main() {
       final a = sourceMp3Args('in put.mp4', 'o.mp3', copy: true);
       expect(hasSeq(a, ['-c:a', 'copy']), isTrue);
       expect(a.sublist(a.length - 3), ['-f', 'mp3', 'o.mp3']);
-      expect(a.where((x) => x == 'in put.mp4'), hasLength(1),
-          reason: 'a path with a space is ONE argument');
+      expect(
+        a.where((x) => x == 'in put.mp4'),
+        hasLength(1),
+        reason: 'a path with a space is ONE argument',
+      );
       expect(hasSeq(a, ['-i', 'in put.mp4']), isTrue);
     });
     test('args_encode', () {
@@ -98,14 +103,22 @@ void main() {
     late Directory tmp;
     setUp(() => tmp = Directory.systemTemp.createTempSync('pipe_fi'));
     tearDown(() => tmp.deleteSync(recursive: true));
-    File touch(String name) => File('${tmp.path}/$name')..writeAsStringSync('x');
+    File touch(String name) =>
+        File('${tmp.path}/$name')..writeAsStringSync('x');
 
     test('find_instrumental', () {
       touch('song_(Instrumental)_UVR.wav');
       touch('notes.txt');
-      expect(findInstrumental(tmp)?.path, '${tmp.path}/song_(Instrumental)_UVR.wav');
+      expect(
+        findInstrumental(tmp)?.path,
+        samePath('${tmp.path}/song_(Instrumental)_UVR.wav'),
+      );
       touch('x_instrumental_2.wav');
-      expect(findInstrumental(tmp), isNull, reason: 'two candidates is ambiguous');
+      expect(
+        findInstrumental(tmp),
+        isNull,
+        reason: 'two candidates is ambiguous',
+      );
     });
     test('find_none', () {
       expect(findInstrumental(tmp), isNull);
@@ -118,7 +131,10 @@ void main() {
       touch('song_(Instrumental).mp3');
       Directory('${tmp.path}/a_(Instrumental).wav').createSync();
       touch('b_(Instrumental).wav');
-      expect(findInstrumental(tmp)?.path, '${tmp.path}/b_(Instrumental).wav');
+      expect(
+        findInstrumental(tmp)?.path,
+        samePath('${tmp.path}/b_(Instrumental).wav'),
+      );
     });
     test('find_is_case_insensitive', () {
       touch('SONG_(INSTRUMENTAL).WAV');
@@ -141,16 +157,20 @@ void main() {
   // ------------------------------------------------------------ runners
   final host = parseHost(Platform.version);
   final noTools = ToolsDir('/nonexistent-tools');
-  final ffmpegPath = findExecutable('ffmpeg',
-      os: host.$1,
-      tools: noTools,
-      env: Platform.environment,
-      extraDirs: defaultExtraDirs(host.$1));
-  final ffprobePath = findExecutable('ffprobe',
-      os: host.$1,
-      tools: noTools,
-      env: Platform.environment,
-      extraDirs: defaultExtraDirs(host.$1));
+  final ffmpegPath = findExecutable(
+    'ffmpeg',
+    os: host.$1,
+    tools: noTools,
+    env: Platform.environment,
+    extraDirs: defaultExtraDirs(host.$1),
+  );
+  final ffprobePath = findExecutable(
+    'ffprobe',
+    os: host.$1,
+    tools: noTools,
+    env: Platform.environment,
+    extraDirs: defaultExtraDirs(host.$1),
+  );
   final noFfmpeg = (ffmpegPath == null || ffprobePath == null)
       ? 'ffmpeg not found'
       : false;
@@ -160,26 +180,39 @@ void main() {
       : (noFfmpeg == false ? false : noFfmpeg);
 
   ToolPaths realTools({String separator = '/nonexistent/sep'}) => ToolPaths(
-      ffmpeg: ffmpegPath ?? '/nonexistent/ffmpeg',
-      ffprobe: ffprobePath ?? '/nonexistent/ffprobe',
-      separator: separator,
-      modelDir: '/nonexistent/models');
+    ffmpeg: ffmpegPath ?? '/nonexistent/ffmpeg',
+    ffprobe: ffprobePath ?? '/nonexistent/ffprobe',
+    separator: separator,
+    modelDir: '/nonexistent/models',
+  );
 
   void ff(List<String> args) {
     final r = Process.runSync(ffmpegPath!, ['-v', 'error', '-y', ...args]);
     if (r.exitCode != 0) throw Exception('ffmpeg failed: ${r.stderr}');
   }
 
-  String probe(String file, String entries) => (Process.runSync(ffprobePath!, [
-        '-v', 'error', '-show_entries', entries, '-of', 'csv=p=0', file
-      ]).stdout as String)
-      .trim();
+  String probe(String file, String entries) =>
+      (Process.runSync(ffprobePath!, [
+                '-v',
+                'error',
+                '-show_entries',
+                entries,
+                '-of',
+                'csv=p=0',
+                file,
+              ]).stdout
+              as String)
+          .trim();
 
-  Future<void> waitUntil(bool Function() condition,
-      {Duration timeout = const Duration(seconds: 10)}) async {
+  Future<void> waitUntil(
+    bool Function() condition, {
+    Duration timeout = const Duration(seconds: 10),
+  }) async {
     final end = DateTime.now().add(timeout);
     while (!condition()) {
-      if (DateTime.now().isAfter(end)) throw TestFailure('condition not met in $timeout');
+      if (DateTime.now().isAfter(end)) {
+        throw TestFailure('condition not met in $timeout');
+      }
       await Future<void>.delayed(const Duration(milliseconds: 50));
     }
   }
@@ -203,7 +236,10 @@ void main() {
       File(path).parent.createSync(recursive: true);
       ff([
         if (audio) ...['-f', 'lavfi', '-i', 'sine=frequency=440:duration=3'],
-        '-f', 'lavfi', '-i', 'color=c=black:s=64x64:d=3',
+        '-f',
+        'lavfi',
+        '-i',
+        'color=c=black:s=64x64:d=3',
         if (audio) ...['-shortest', '-c:a', 'aac'],
         path,
       ]);
@@ -218,26 +254,52 @@ void main() {
       expect(leftovers(work), isEmpty);
       final d = await durationSeconds(realTools(), '${work.path}/source.mp3');
       expect(d, inInclusiveRange(2.9, 3.1));
-      expect(probe('${work.path}/source.wav', 'stream=codec_name,sample_rate,channels'),
-          'pcm_s16le,44100,2');
+      expect(
+        probe(
+          '${work.path}/source.wav',
+          'stream=codec_name,sample_rate,channels',
+        ),
+        'pcm_s16le,44100,2',
+      );
     }, skip: noFfmpeg);
 
     test('import_mp3_copied', () async {
       final mp3 = '${tmp.path}/test.mp3';
-      ff(['-f', 'lavfi', '-i', 'sine=frequency=330:duration=3', '-c:a', 'libmp3lame', '-b:a', '160k', mp3]);
+      ff([
+        '-f',
+        'lavfi',
+        '-i',
+        'sine=frequency=330:duration=3',
+        '-c:a',
+        'libmp3lame',
+        '-b:a',
+        '160k',
+        mp3,
+      ]);
       await importSong(realTools(), mp3, work);
       expect(probe('${work.path}/source.mp3', 'stream=codec_name'), 'mp3');
-      final a = File(mp3).lengthSync(), b = File('${work.path}/source.mp3').lengthSync();
-      expect((a - b).abs() / a, lessThan(0.05), reason: 'copied, not re-encoded');
+      final a = File(mp3).lengthSync(),
+          b = File('${work.path}/source.mp3').lengthSync();
+      expect(
+        (a - b).abs() / a,
+        lessThan(0.05),
+        reason: 'copied, not re-encoded',
+      );
       expect(probe('${work.path}/source.mp3', 'stream=bit_rate'), '160000');
     }, skip: noFfmpeg);
 
     test('import_no_audio', () async {
       final mp4 = makeMp4('${tmp.path}/silent.mp4', audio: false);
       await expectLater(
-          importSong(realTools(), mp4, work),
-          throwsA(isA<ImportException>()
-              .having((e) => e.message, 'message', 'No audio track in this file')));
+        importSong(realTools(), mp4, work),
+        throwsA(
+          isA<ImportException>().having(
+            (e) => e.message,
+            'message',
+            'No audio track in this file',
+          ),
+        ),
+      );
       expect(work.listSync(), isEmpty);
     }, skip: noFfmpeg);
 
@@ -256,32 +318,66 @@ void main() {
     }, skip: noFfmpeg);
 
     test('import_not_a_media_file', () async {
-      final junk = File('${tmp.path}/junk.mp4')..writeAsStringSync('this is not media');
-      await expectLater(importSong(realTools(), junk.path, work),
-          throwsA(isA<ProcessFailure>()));
+      final junk = File('${tmp.path}/junk.mp4')
+        ..writeAsStringSync('this is not media');
+      await expectLater(
+        importSong(realTools(), junk.path, work),
+        throwsA(isA<ProcessFailure>()),
+      );
       expect(work.listSync(), isEmpty);
     }, skip: noFfmpeg);
 
     test('import_ffmpeg_failure_removes_part_file', () async {
       // A fake ffprobe says "aac"; a fake ffmpeg writes half a file and fails.
       final probeFake = _fakeScript(tmp.path, 'ffprobe', 'echo aac');
-      final ffmpegFake = _fakeScript(tmp.path, 'ffmpeg',
-          r'for last; do :; done; echo partial > "$last"; echo "boom" >&2; exit 1');
+      final ffmpegFake = _fakeScript(
+        tmp.path,
+        'ffmpeg',
+        r'for last; do :; done; echo partial > "$last"; echo "boom" >&2; exit 1',
+      );
       final tools = ToolPaths(
-          ffmpeg: ffmpegFake, ffprobe: probeFake, separator: 'x', modelDir: 'm');
+        ffmpeg: ffmpegFake,
+        ffprobe: probeFake,
+        separator: 'x',
+        modelDir: 'm',
+      );
       await expectLater(
-          importSong(tools, '/some/in.mp4', work),
-          throwsA(isA<ProcessFailure>().having((e) => e.lastLines, 'lines', contains('boom'))));
-      expect(work.listSync(), isEmpty, reason: 'no .part file and no source files');
+        importSong(tools, '/some/in.mp4', work),
+        throwsA(
+          isA<ProcessFailure>().having(
+            (e) => e.lastLines,
+            'lines',
+            contains('boom'),
+          ),
+        ),
+      );
+      expect(
+        work.listSync(),
+        isEmpty,
+        reason: 'no .part file and no source files',
+      );
     }, skip: noSh);
 
     test('durationSeconds_reads_ffprobe', () async {
       final fake = _fakeScript(tmp.path, 'ffprobe', 'echo 12.5');
-      final tools = ToolPaths(ffmpeg: 'x', ffprobe: fake, separator: 'x', modelDir: 'm');
+      final tools = ToolPaths(
+        ffmpeg: 'x',
+        ffprobe: fake,
+        separator: 'x',
+        modelDir: 'm',
+      );
       expect(await durationSeconds(tools, 'any.mp3'), 12.5);
       final bad = _fakeScript(tmp.path, 'ffprobe2', 'echo N/A');
-      final tools2 = ToolPaths(ffmpeg: 'x', ffprobe: bad, separator: 'x', modelDir: 'm');
-      await expectLater(durationSeconds(tools2, 'any.mp3'), throwsFormatException);
+      final tools2 = ToolPaths(
+        ffmpeg: 'x',
+        ffprobe: bad,
+        separator: 'x',
+        modelDir: 'm',
+      );
+      await expectLater(
+        durationSeconds(tools2, 'any.mp3'),
+        throwsFormatException,
+      );
     }, skip: noSh);
   });
 
@@ -299,20 +395,24 @@ void main() {
 
     /// A separator that copies [wavFixture] into --output_dir, like the real tool.
     String copyingSeparator(String wavFixture) => _fakeScript(
-        tmp.path,
-        'sep',
-        r'''
+      tmp.path,
+      'sep',
+      r'''
 echo "$*" >> __LOG__
 echo "working"
 while [ $# -gt 0 ]; do if [ "$1" = "--output_dir" ]; then out="$2"; fi; shift; done
 cp "__WAV__" "$out/x_(Instrumental)_m.wav"
 '''
-            .replaceAll('__LOG__', sepLog)
-            .replaceAll('__WAV__', wavFixture));
+          .replaceAll('__LOG__', sepLog)
+          .replaceAll('__WAV__', wavFixture),
+    );
 
     /// A separator that stays alive for a long time, with a child process (sleep).
-    String sleepingSeparator(String marker) => _fakeScript(tmp.path, 'sleepsep',
-        'echo started >> $sepLog\nsleep $marker\n');
+    String sleepingSeparator(String marker) => _fakeScript(
+      tmp.path,
+      'sleepsep',
+      'echo started >> $sepLog\nsleep $marker\n',
+    );
 
     bool alive(String marker) =>
         Process.runSync('pgrep', ['-f', 'sleep $marker']).exitCode == 0;
@@ -321,8 +421,10 @@ cp "__WAV__" "$out/x_(Instrumental)_m.wav"
     // optional upper bound for tests that are about how fast a cancel is.
     Future<void> expectCancelled(SeparationJob job, {Duration? within}) async {
       final sw = Stopwatch()..start();
-      await expectLater(job.done.timeout(const Duration(seconds: 8)),
-          throwsA(isA<SeparationCancelled>()));
+      await expectLater(
+        job.done.timeout(const Duration(seconds: 8)),
+        throwsA(isA<SeparationCancelled>()),
+      );
       if (within != null) {
         expect(sw.elapsed, lessThan(within), reason: 'cancel took too long');
       }
@@ -335,16 +437,35 @@ cp "__WAV__" "$out/x_(Instrumental)_m.wav"
 
     test('separate_success', () async {
       final wav = '${tmp.path}/fixture.wav';
-      ff(['-f', 'lavfi', '-i', 'sine=frequency=440:duration=1', '-ac', '2', '-ar', '44100', wav]);
+      ff([
+        '-f',
+        'lavfi',
+        '-i',
+        'sine=frequency=440:duration=1',
+        '-ac',
+        '2',
+        '-ar',
+        '44100',
+        wav,
+      ]);
       final lines = <String>[];
-      final job = separate(realTools(separator: copyingSeparator(wav)), work, onLine: lines.add);
+      final job = separate(
+        realTools(separator: copyingSeparator(wav)),
+        work,
+        onLine: lines.add,
+      );
       await job.done;
       expect(File('${work.path}/instrumental.mp3').existsSync(), isTrue);
       expect(Directory('${work.path}/sep').existsSync(), isFalse);
       expect(leftovers(work), isEmpty);
       expect(lines, contains('working'));
-      expect(probe('${work.path}/instrumental.mp3', 'stream=codec_name,sample_rate,channels,bit_rate'),
-          'mp3,44100,2,192000');
+      expect(
+        probe(
+          '${work.path}/instrumental.mp3',
+          'stream=codec_name,sample_rate,channels,bit_rate',
+        ),
+        'mp3,44100,2,192000',
+      );
       final args = File(sepLog).readAsStringSync();
       expect(args, contains('${work.path}/source.wav'));
       expect(args, contains('--single_stem Instrumental'));
@@ -352,11 +473,18 @@ cp "__WAV__" "$out/x_(Instrumental)_m.wav"
 
     test('separate_cancel', () async {
       const marker = '3000.31';
-      final job = patient(realTools(separator: sleepingSeparator(marker)), work);
+      final job = patient(
+        realTools(separator: sleepingSeparator(marker)),
+        work,
+      );
       await waitUntil(() => alive(marker)); // the fake separator is running
       job.cancel();
       await expectCancelled(job);
-      expect(alive(marker), isFalse, reason: 'the child process must be killed too');
+      expect(
+        alive(marker),
+        isFalse,
+        reason: 'the child process must be killed too',
+      );
       expect(Directory('${work.path}/sep').existsSync(), isFalse);
       expect(leftovers(work), isEmpty);
       expect(File('${work.path}/instrumental.mp3').existsSync(), isFalse);
@@ -369,11 +497,23 @@ cp "__WAV__" "$out/x_(Instrumental)_m.wav"
 while [ $# -gt 0 ]; do if [ "$1" = "--output_dir" ]; then out="$2"; fi; shift; done
 echo wav > "$out/x_(Instrumental)_m.wav"
 ''');
-      final slowFfmpeg = _fakeScript(tmp.path, 'ffmpeg',
-          'touch "$marked"\nsleep $marker\n');
+      final slowFfmpeg = _fakeScript(
+        tmp.path,
+        'ffmpeg',
+        'touch "$marked"\nsleep $marker\n',
+      );
       final job = patient(
-          ToolPaths(ffmpeg: slowFfmpeg, ffprobe: 'x', separator: sep, modelDir: 'm'), work);
-      await waitUntil(() => File(marked).existsSync()); // the encode step started
+        ToolPaths(
+          ffmpeg: slowFfmpeg,
+          ffprobe: 'x',
+          separator: sep,
+          modelDir: 'm',
+        ),
+        work,
+      );
+      await waitUntil(
+        () => File(marked).existsSync(),
+      ); // the encode step started
       job.cancel();
       await expectCancelled(job);
       expect(alive(marker), isFalse);
@@ -383,7 +523,10 @@ echo wav > "$out/x_(Instrumental)_m.wav"
 
     test('separate_cancel_right_away', () async {
       const marker = '3000.33';
-      final job = patient(realTools(separator: sleepingSeparator(marker)), work);
+      final job = patient(
+        realTools(separator: sleepingSeparator(marker)),
+        work,
+      );
       job.cancel();
       await expectCancelled(job);
       expect(alive(marker), isFalse);
@@ -392,7 +535,10 @@ echo wav > "$out/x_(Instrumental)_m.wav"
 
     test('separate_cancel_twice_and_after_done_is_harmless', () async {
       const marker = '3000.34';
-      final job = patient(realTools(separator: sleepingSeparator(marker)), work);
+      final job = patient(
+        realTools(separator: sleepingSeparator(marker)),
+        work,
+      );
       await waitUntil(() => alive(marker));
       job.cancel();
       job.cancel();
@@ -425,16 +571,25 @@ echo wav > "$out/x_(Instrumental)_m.wav"
     test('separate_cancel_escalates_to_sigkill', () async {
       // A program that ignores SIGTERM must still be ended (SIGKILL after 3 s).
       final ready = '${tmp.path}/ready';
-      final sep = _fakeScript(tmp.path, 'trapsep',
-          'trap "" TERM\ntouch "$ready"\nwhile true; do sleep 1; done\n');
-      final job = separate(realTools(separator: sep), work,
-          killGrace: const Duration(milliseconds: 500));
+      final sep = _fakeScript(
+        tmp.path,
+        'trapsep',
+        'trap "" TERM\ntouch "$ready"\nwhile true; do sleep 1; done\n',
+      );
+      final job = separate(
+        realTools(separator: sep),
+        work,
+        killGrace: const Duration(milliseconds: 500),
+      );
       try {
         await waitUntil(() => File(ready).existsSync());
         job.cancel();
         await expectCancelled(job, within: const Duration(seconds: 6));
-        expect(Process.runSync('pgrep', ['-f', sep]).exitCode, isNot(0),
-            reason: 'the TERM-proof script must be gone');
+        expect(
+          Process.runSync('pgrep', ['-f', sep]).exitCode,
+          isNot(0),
+          reason: 'the TERM-proof script must be gone',
+        );
       } finally {
         Process.runSync('pkill', ['-9', '-f', sep]);
       }
@@ -442,10 +597,16 @@ echo wav > "$out/x_(Instrumental)_m.wav"
 
     test('separate_kill_grace_is_configurable', () async {
       final ready = '${tmp.path}/ready';
-      final sep = _fakeScript(tmp.path, 'trapsep',
-          'trap "" TERM\ntouch "$ready"\nwhile true; do sleep 1; done\n');
-      final job = separate(realTools(separator: sep), work,
-          killGrace: const Duration(milliseconds: 300));
+      final sep = _fakeScript(
+        tmp.path,
+        'trapsep',
+        'trap "" TERM\ntouch "$ready"\nwhile true; do sleep 1; done\n',
+      );
+      final job = separate(
+        realTools(separator: sep),
+        work,
+        killGrace: const Duration(milliseconds: 300),
+      );
       try {
         // Only cancel once SIGTERM is being ignored (the trap is installed).
         await waitUntil(() => File(ready).existsSync());
@@ -457,13 +618,20 @@ echo wav > "$out/x_(Instrumental)_m.wav"
     }, skip: noSh);
 
     test('separate_failure', () async {
-      final sep = _fakeScript(tmp.path, 'sep', 'echo "model missing" >&2\nexit 2\n');
+      final sep = _fakeScript(
+        tmp.path,
+        'sep',
+        'echo "model missing" >&2\nexit 2\n',
+      );
       final job = separate(realTools(separator: sep), work);
       await expectLater(
-          job.done,
-          throwsA(isA<ProcessFailure>()
+        job.done,
+        throwsA(
+          isA<ProcessFailure>()
               .having((e) => e.exitCode, 'exitCode', 2)
-              .having((e) => e.lastLines, 'lines', contains('model missing'))));
+              .having((e) => e.lastLines, 'lines', contains('model missing')),
+        ),
+      );
       expect(Directory('${work.path}/sep').existsSync(), isFalse);
       expect(leftovers(work), isEmpty);
     }, skip: noSh);
@@ -480,10 +648,20 @@ echo wav > "$out/x_(Instrumental)_m.wav"
 while [ $# -gt 0 ]; do if [ "$1" = "--output_dir" ]; then out="$2"; fi; shift; done
 echo wav > "$out/x_(Instrumental)_m.wav"
 ''');
-      final badFfmpeg = _fakeScript(tmp.path, 'ffmpeg',
-          r'for last; do :; done; echo partial > "$last"; exit 1');
+      final badFfmpeg = _fakeScript(
+        tmp.path,
+        'ffmpeg',
+        r'for last; do :; done; echo partial > "$last"; exit 1',
+      );
       final job = separate(
-          ToolPaths(ffmpeg: badFfmpeg, ffprobe: 'x', separator: sep, modelDir: 'm'), work);
+        ToolPaths(
+          ffmpeg: badFfmpeg,
+          ffprobe: 'x',
+          separator: sep,
+          modelDir: 'm',
+        ),
+        work,
+      );
       await expectLater(job.done, throwsA(isA<ProcessFailure>()));
       expect(leftovers(work), isEmpty);
       expect(Directory('${work.path}/sep').existsSync(), isFalse);
@@ -492,17 +670,32 @@ echo wav > "$out/x_(Instrumental)_m.wav"
 
     test('separate_removes_stale_sep_folder', () async {
       Directory('${work.path}/sep').createSync();
-      File('${work.path}/sep/old_(Instrumental).wav').writeAsStringSync('stale');
+      File('${work.path}/sep/old_(Instrumental).wav')
+          .writeAsStringSync('stale');
       final sep = _fakeScript(tmp.path, 'sep', r'''
 while [ $# -gt 0 ]; do if [ "$1" = "--output_dir" ]; then out="$2"; fi; shift; done
 echo wav > "$out/new_(Instrumental)_m.wav"
 ''');
-      final badFfmpeg = _fakeScript(tmp.path, 'ffmpeg', r'echo "$*" >> __LOG__'.replaceAll('__LOG__', '${tmp.path}/ff.log'));
+      final badFfmpeg = _fakeScript(
+        tmp.path,
+        'ffmpeg',
+        r'echo "$*" >> __LOG__'.replaceAll('__LOG__', '${tmp.path}/ff.log'),
+      );
       final job = separate(
-          ToolPaths(ffmpeg: badFfmpeg, ffprobe: 'x', separator: sep, modelDir: 'm'), work);
+        ToolPaths(
+          ffmpeg: badFfmpeg,
+          ffprobe: 'x',
+          separator: sep,
+          modelDir: 'm',
+        ),
+        work,
+      );
       await job.done.catchError((Object _) {});
-      expect(File('${tmp.path}/ff.log').readAsStringSync(), contains('new_(Instrumental)_m.wav'),
-          reason: 'the stale file did not make the result ambiguous');
+      expect(
+        File('${tmp.path}/ff.log').readAsStringSync(),
+        contains('new_(Instrumental)_m.wav'),
+        reason: 'the stale file did not make the result ambiguous',
+      );
     }, skip: noSh);
   });
 }

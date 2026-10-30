@@ -3,20 +3,22 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kantahe_maker/project.dart';
+import 'package:path/path.dart' as p;
 
-SongProject full() => SongProject(id: '20260102-030405', inputPath: '/x/in put.mp4')
-  ..title = 'T'
-  ..artist = 'A'
-  ..number = 7
-  ..composer = 'C'
-  ..lyricist = 'L'
-  ..lyrics = 'one\ntwo'
-  ..times = [1.5, null]
-  ..wordTimes = [
-    [1.5, 1.8],
-    null,
-  ]
-  ..offset = -0.1;
+SongProject full() =>
+    SongProject(id: '20260102-030405', inputPath: '/x/in put.mp4')
+      ..title = 'T'
+      ..artist = 'A'
+      ..number = 7
+      ..composer = 'C'
+      ..lyricist = 'L'
+      ..lyrics = 'one\ntwo'
+      ..times = [1.5, null]
+      ..wordTimes = [
+        [1.5, 1.8],
+        null,
+      ]
+      ..offset = -0.1;
 
 void expectSame(SongProject a, SongProject b) {
   expect(a.id, b.id);
@@ -36,7 +38,8 @@ void main() {
   group('json', () {
     test('json_roundtrip', () {
       final back = SongProject.fromJson(
-          jsonDecode(jsonEncode(full().toJson())) as Map<String, dynamic>);
+        jsonDecode(jsonEncode(full().toJson())) as Map<String, dynamic>,
+      );
       expectSame(back, full());
     });
 
@@ -52,7 +55,10 @@ void main() {
     });
 
     test('json_missing_required', () {
-      expect(() => SongProject.fromJson({'inputPath': 'a'}), throwsFormatException);
+      expect(
+        () => SongProject.fromJson({'inputPath': 'a'}),
+        throwsFormatException,
+      );
       expect(() => SongProject.fromJson({'id': 'a'}), throwsFormatException);
     });
 
@@ -61,24 +67,39 @@ void main() {
         {'id': 'x', 'inputPath': 'a', 'number': 'seven'},
         {'id': 'x', 'inputPath': 'a', 'title': 5},
         {'id': 'x', 'inputPath': 'a', 'times': 'nope'},
-        {'id': 'x', 'inputPath': 'a', 'times': [1, 'x']},
+        {
+          'id': 'x',
+          'inputPath': 'a',
+          'times': [1, 'x'],
+        },
         {'id': 'x', 'inputPath': 'a', 'offset': 'late'},
         {'id': 5, 'inputPath': 'a'},
       ]) {
-        expect(() => SongProject.fromJson(bad), throwsFormatException, reason: '$bad');
+        expect(
+          () => SongProject.fromJson(bad),
+          throwsFormatException,
+          reason: '$bad',
+        );
       }
     });
 
     test('json_integers_are_fine_for_times_and_offset', () {
-      final p = SongProject.fromJson(
-          {'id': 'x', 'inputPath': 'a', 'times': [1, null, 2], 'offset': 0});
+      final p = SongProject.fromJson({
+        'id': 'x',
+        'inputPath': 'a',
+        'times': [1, null, 2],
+        'offset': 0,
+      });
       expect(p.times, [1.0, null, 2.0]);
       expect(p.offset, 0.0);
     });
 
     test('json_unknown_keys_are_ignored', () {
-      final p = SongProject.fromJson(
-          {'id': 'x', 'inputPath': 'a', 'futureField': {'a': 1}});
+      final p = SongProject.fromJson({
+        'id': 'x',
+        'inputPath': 'a',
+        'futureField': {'a': 1},
+      });
       expect(p.id, 'x');
     });
   });
@@ -123,7 +144,11 @@ void main() {
         ..lyrics = 'a\nb'
         ..times = [1, 2];
       p.setLyrics('  a  \n\n\nb\r\n');
-      expect(p.lyrics, '  a  \n\n\nb\r\n', reason: 'the text is stored as typed');
+      expect(
+        p.lyrics,
+        '  a  \n\n\nb\r\n',
+        reason: 'the text is stored as typed',
+      );
       expect(p.times, [1, 2], reason: 'the lines did not change');
     });
 
@@ -132,8 +157,12 @@ void main() {
         ..lyrics = 'a\nb\nc'
         ..times = [1, 2, 3];
       p.setLyrics('a\nNEW\nb\nc');
-      expect(p.times, [1, null, null, null],
-          reason: 'index-aligned: shifted lines lose their taps');
+      expect(p.times, [
+        1,
+        null,
+        null,
+        null,
+      ], reason: 'index-aligned: shifted lines lose their taps');
     });
 
     test('set_lyrics_when_times_are_shorter_than_lines', () {
@@ -194,7 +223,9 @@ void main() {
       final futures = <Future<void>>[];
       for (var i = 0; i < 6; i++) {
         p.title = 'v$i';
-        futures.add(p.save(dir)); // not awaited: the UI saves after every change
+        futures.add(
+          p.save(dir),
+        ); // not awaited: the UI saves after every change
       }
       await Future.wait(futures);
       expect((await SongProject.load(dir)).title, 'v5');
@@ -209,8 +240,11 @@ void main() {
       final b = p.save(dir);
       p.title = 'late';
       await Future.wait([a, b]);
-      expect((await SongProject.load(dir)).title, 'late',
-          reason: 'the newest state wins, not the state at the time of the call');
+      expect(
+        (await SongProject.load(dir)).title,
+        'late',
+        reason: 'the newest state wins, not the state at the time of the call',
+      );
     });
 
     test('save_error_does_not_block_later_saves', () async {
@@ -234,9 +268,15 @@ void main() {
       final dir = Directory('${tmp.path}/p1')..createSync();
       File('${dir.path}/project.json').writeAsStringSync('{');
       await expectLater(
-          SongProject.load(dir),
-          throwsA(isA<FormatException>()
-              .having((e) => e.message, 'message', contains('project.json'))));
+        SongProject.load(dir),
+        throwsA(
+          isA<FormatException>().having(
+            (e) => e.message,
+            'message',
+            contains('project.json'),
+          ),
+        ),
+      );
     });
 
     test('load_not_an_object', () async {
@@ -247,7 +287,10 @@ void main() {
 
     test('load_missing_file', () async {
       final dir = Directory('${tmp.path}/none')..createSync();
-      await expectLater(SongProject.load(dir), throwsA(isA<FileSystemException>()));
+      await expectLater(
+        SongProject.load(dir),
+        throwsA(isA<FileSystemException>()),
+      );
     });
 
     test('list_order', () async {
@@ -258,7 +301,10 @@ void main() {
       Directory('${tmp.path}/junk').createSync();
       File('${tmp.path}/notes.txt').writeAsStringSync('x');
       final dirs = await listProjectDirs(tmp);
-      expect(dirs.map((d) => d.path.split('/').last), ['20260102-000000', '20260101-000000']);
+      expect(dirs.map((d) => p.basename(d.path)), [
+        '20260102-000000',
+        '20260101-000000',
+      ]);
     });
 
     test('list_missing_root', () async {
@@ -275,13 +321,20 @@ void main() {
       expect(newProjectId(DateTime(2026, 1, 2, 3, 4, 5)), '20260102-030405');
     });
     test('new_id_two_digit_everything', () {
-      expect(newProjectId(DateTime(2026, 12, 31, 23, 59, 59)), '20261231-235959');
+      expect(
+        newProjectId(DateTime(2026, 12, 31, 23, 59, 59)),
+        '20261231-235959',
+      );
     });
   });
 
   group('word times', () {
-    Map<String, dynamic> json(Object? words) =>
-        {'id': 'x', 'inputPath': 'a.mp3', 'times': [1, 2, null], 'wordTimes': words};
+    Map<String, dynamic> json(Object? words) => {
+      'id': 'x',
+      'inputPath': 'a.mp3',
+      'times': [1, 2, null],
+      'wordTimes': words,
+    };
 
     test('project_backcompat', () {
       final p = SongProject.fromJson({
@@ -290,28 +343,42 @@ void main() {
         'times': [1, 2, null],
       });
       expect(p.wordTimes, [null, null, null]);
-      expect(SongProject.fromJson({'id': 'x', 'inputPath': 'a.mp3'}).wordTimes, isEmpty);
+      expect(
+        SongProject.fromJson({'id': 'x', 'inputPath': 'a.mp3'}).wordTimes,
+        isEmpty,
+      );
     });
 
     test('word_times_json_roundtrip_with_integers', () {
-      final p = SongProject.fromJson(json([
-        [1, 1.5, null],
-        null,
-        [3],
-      ]));
+      final p = SongProject.fromJson(
+        json([
+          [1, 1.5, null],
+          null,
+          [3],
+        ]),
+      );
       expect(p.wordTimes, [
         [1.0, 1.5, null],
         null,
         [3.0],
       ]);
-      final back = SongProject.fromJson(jsonDecode(jsonEncode(p.toJson())) as Map<String, dynamic>);
+      final back = SongProject.fromJson(
+        jsonDecode(jsonEncode(p.toJson())) as Map<String, dynamic>,
+      );
       expect(back.wordTimes, p.wordTimes);
     });
 
     test('word_times_wrong_type_is_an_error', () {
       expect(() => SongProject.fromJson(json('x')), throwsFormatException);
       expect(() => SongProject.fromJson(json([5])), throwsFormatException);
-      expect(() => SongProject.fromJson(json([['a']])), throwsFormatException);
+      expect(
+        () => SongProject.fromJson(
+          json([
+            ['a'],
+          ]),
+        ),
+        throwsFormatException,
+      );
     });
 
     test('set_lyrics_keeps_word_times_of_unchanged_lines', () {

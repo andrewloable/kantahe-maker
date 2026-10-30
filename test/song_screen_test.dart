@@ -18,6 +18,10 @@ import 'package:kantahe_maker/tools.dart';
 import 'support/fake_player.dart';
 import 'support/settle.dart';
 
+import 'package:path/path.dart' as p;
+
+import 'support/windows_safe.dart';
+
 const fakeTools = ToolPaths(
   ffmpeg: '/t/ffmpeg',
   ffprobe: '/t/ffprobe',
@@ -70,7 +74,7 @@ class Song {
   final player = FakePlayer();
 
   Map<String, dynamic> json() =>
-      jsonDecode(File('${dir.path}/project.json').readAsStringSync())
+      jsonDecode(readText(File('${dir.path}/project.json')))
           as Map<String, dynamic>;
 
   FakeSepJob get sep => seps.last;
@@ -619,7 +623,9 @@ void main() {
         until: () => File(s.savePath!).existsSync() && shown('Exported'),
       );
       expect(s.suggested, ['A - T.karmp3']);
-      expect(s.durationFiles, ['${s.dir.path}/instrumental.mp3']);
+      expect(s.durationFiles.map(p.normalize), [
+        p.normalize('${s.dir.path}/instrumental.mp3'),
+      ]);
       final zip = ZipDecoder().decodeBytes(File(s.savePath!).readAsBytesSync());
       expect(zip.files.map((f) => f.name), [
         'A - T.mp3',
