@@ -22,3 +22,16 @@ String readText(File file) {
     }
   }
 }
+
+/// Deletes a test's temporary folder. On Windows a save the screen starts while it closes
+/// can still hold a file in it for a moment, so try again, then leave it to the system.
+void deleteTemp(Directory dir) {
+  for (var attempt = 0; attempt < 20; attempt++) {
+    try {
+      if (dir.existsSync()) dir.deleteSync(recursive: true);
+      return;
+    } on FileSystemException {
+      sleep(const Duration(milliseconds: 100));
+    }
+  }
+}

@@ -22,7 +22,7 @@ class Calls {
 
 Future<Directory> makeRoot(WidgetTester tester) async {
   final root = Directory.systemTemp.createTempSync('home_test');
-  addTearDown(() => root.deleteSync(recursive: true));
+  addTearDown(() => deleteTemp(root));
   return root;
 }
 
@@ -331,6 +331,12 @@ void main() {
       until: () =>
           readText(File('${root.path}/20260101-000000/project.json'))
               .contains('New Artist'),
+      describe: () => [
+        for (final e in Directory('${root.path}/20260101-000000').listSync())
+          '${e.path}: ${e is File ? '${e.lengthSync()} bytes' : 'dir'}',
+        readText(File('${root.path}/20260101-000000/project.json')),
+        'snack bars: ${find.byType(SnackBar).evaluate().length}',
+      ].join('\n'),
     );
     await tester.pageBack();
     await settle(

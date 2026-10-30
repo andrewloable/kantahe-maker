@@ -257,6 +257,41 @@ void main() {
       expectSame(await SongProject.load(dir), full());
     });
 
+    group('rename retries', () {
+      final real = SongProject.renameFile;
+      tearDown(() => SongProject.renameFile = real);
+
+      test('save_retries_a_rename_that_fails_for_a_moment', () async {
+        final dir = Directory('${tmp.path}/p1')..createSync();
+        var calls = 0;
+        SongProject.renameFile = (from, to) async {
+          if (++calls <= 3) {
+            throw const FileSystemException('sharing violation', 'project.json');
+          }
+          await real(from, to);
+        };
+        await full().save(dir);
+        expect(calls, 4);
+        expectSame(await SongProject.load(dir), full());
+        expect(File('${dir.path}/project.json.part').existsSync(), isFalse);
+      });
+
+      test('save_gives_up_after_a_few_retries_and_keeps_the_old_file', () async {
+        final dir = Directory('${tmp.path}/p1')..createSync();
+        await full().save(dir);
+        var calls = 0;
+        SongProject.renameFile = (from, to) async {
+          calls++;
+          throw const FileSystemException('sharing violation', 'project.json');
+        };
+        final changed = full()..title = 'Changed';
+        await expectLater(changed.save(dir), throwsA(isA<FileSystemException>()));
+        expect(calls, 10);
+        SongProject.renameFile = real;
+        expect((await SongProject.load(dir)).title, 'T', reason: 'the old file is intact');
+      });
+    });
+
     test('save_is_utf8', () async {
       final dir = Directory('${tmp.path}/p1')..createSync();
       final p = full()..lyrics = 'Ñandú 歌\nsecond';

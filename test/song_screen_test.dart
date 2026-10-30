@@ -95,7 +95,7 @@ Future<Song> pumpSong(
     ..toolsResult = toolsAvailable ? fakeTools : null
     ..importError = importError;
   s.root = Directory.systemTemp.createTempSync('song_test');
-  addTearDown(() => s.root.deleteSync(recursive: true));
+  addTearDown(() => deleteTemp(s.root));
   s.dir = Directory('${s.root.path}/20260101-000000');
   s.project = SongProject(id: '20260101-000000', inputPath: '/x/in.mp4');
   configure?.call(s.project);

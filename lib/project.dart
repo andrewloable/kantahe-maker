@@ -157,8 +157,24 @@ class SongProject {
       const JsonEncoder.withIndent('  ').convert(toJson()),
       flush: true,
     );
-    await part.rename('${dir.path}/project.json');
+    // Windows refuses to replace a file while another program has it open (a virus
+    // scanner, an indexer), usually for a moment: try again a few times before giving up.
+    for (var attempt = 1; ; attempt++) {
+      try {
+        await renameFile(part, '${dir.path}/project.json');
+        return;
+      } on FileSystemException {
+        if (attempt >= 10) rethrow;
+        await Future<void>.delayed(Duration(milliseconds: 50 * attempt));
+      }
+    }
   }
+
+  /// Moves [from] over [to]. A variable so a test can make it fail; the app never sets it.
+  static Future<void> Function(File from, String to) renameFile =
+      (from, to) async {
+        await from.rename(to);
+      };
 
   /// Reads dir/project.json. Throws FormatException if it is not valid, and
   /// FileSystemException if it cannot be read.
