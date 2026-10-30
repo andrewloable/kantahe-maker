@@ -559,7 +559,11 @@ echo wav > "$out/x_(Instrumental)_m.wav"
         await Future<void>.delayed(Duration(milliseconds: rnd.nextInt(40)));
         job.cancel();
         await expectCancelled(job);
-        await Future<void>.delayed(const Duration(milliseconds: 100));
+        // A killed sleep can take a moment to go on a busy machine; a leaked one
+        // sleeps for about 50 minutes.
+        for (var t = 0; t < 20 && alive(marker); t++) {
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+        }
         if (alive(marker)) {
           leaked.add(i);
           Process.runSync('pkill', ['-f', 'sleep $marker']);
