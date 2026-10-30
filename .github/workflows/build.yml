@@ -1,11 +1,13 @@
-# Builds Kantahe Maker on each OS and keeps the result as a workflow artifact. It never
-# publishes a release, pushes or tags (see CLAUDE.md); the owner does that by hand.
+# Builds Kantahe Maker on each OS. When the owner publishes a GitHub release, the three
+# archives are attached to that release. The workflow never creates a release, and never
+# pushes or tags (see CLAUDE.md): the owner does that by hand. A manual run only keeps the
+# archives as workflow artifacts.
 name: build
 
 on:
   workflow_dispatch:
-  push:
-    tags: ['v*']
+  release:
+    types: [published]
 
 permissions:
   contents: read
@@ -78,3 +80,27 @@ jobs:
           name: kantahe-maker-windows
           path: kantahe-maker-windows.zip
           if-no-files-found: error
+
+  # The only job that may write: it adds the files to the release the owner published.
+  attach:
+    if: github.event_name == 'release'
+    needs: [macos, linux, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          path: dist
+      - name: Attach the archives to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -eu
+          safe="${TAG//\//-}"
+          mv dist/kantahe-maker-macos/kantahe-maker-macos.zip "dist/kantahe-maker-$safe-macos.zip"
+          mv dist/kantahe-maker-linux/kantahe-maker-linux.tar.gz "dist/kantahe-maker-$safe-linux.tar.gz"
+          mv dist/kantahe-maker-windows/kantahe-maker-windows.zip "dist/kantahe-maker-$safe-windows.zip"
+          gh release upload "$TAG" "dist/kantahe-maker-$safe-macos.zip" "dist/kantahe-maker-$safe-linux.tar.gz" "dist/kantahe-maker-$safe-windows.zip" --clobber

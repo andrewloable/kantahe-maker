@@ -10,10 +10,12 @@ import 'package:path/path.dart' as p;
 import '../export.dart';
 import '../jobs.dart';
 import '../karmp3.dart' show karMp3Name;
+import '../lyrics_lookup.dart';
 import '../pipeline.dart';
 import '../project.dart';
 import '../tools.dart';
 import 'tap_screen.dart';
+import 'find_lyrics_dialog.dart';
 import 'tools_dialog.dart';
 
 /// The command that shows [path] in the system file manager (a program and its
@@ -49,6 +51,7 @@ class SongScreen extends StatefulWidget {
     this.saveLocation,
     this.revealFile,
     this.createPlayer,
+    this.lyricsFinder,
     this.saveDelay = const Duration(milliseconds: 500),
   });
 
@@ -74,6 +77,9 @@ class SongScreen extends StatefulWidget {
   final Future<String?> Function(String suggestedName)? saveLocation;
   final Future<void> Function(String path)? revealFile;
   final TapPlayer Function()? createPlayer;
+
+  /// Looks lyrics up; null means LRCLIB.
+  final LyricsFinder? lyricsFinder;
 
   /// How long typing pauses before it is saved.
   final Duration saveDelay;
@@ -476,6 +482,70 @@ class _SongScreenState extends State<SongScreen> {
     ),
   );
 
+  /// Looks the lyrics up on LRCLIB (after the dialog's consent) and puts the one the user
+  /// picks into the lyrics box, asking first when there are lyrics already.
+  Future<void> _findLyrics(SongProject project) async {
+    final picked = await showFindLyricsDialog(
+      context,
+      title: project.title,
+      artist: project.artist,
+      finder: widget.lyricsFinder ?? findLyrics,
+    );
+    if (picked == null || !mounted) return;
+    if (project.lyrics.trim().isNotEmpty) {
+      final replace = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Replace the current lyrics?'),
+          content: const Text(
+            'The lyrics in the box are replaced by the ones you picked.',
+          ),
+          actions: [
+            TextButton(
+              key: const ValueKey('lyrics-keep'),
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Keep'),
+            ),
+            FilledButton(
+              key: const ValueKey('lyrics-replace'),
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Replace'),
+            ),
+          ],
+        ),
+      );
+      if (replace != true || !mounted) return;
+    }
+    _controllers['lyrics']!.text = picked.lyrics;
+    _edited((p0) => p0.setLyrics(picked.lyrics));
+  }
+
+  Widget _lyricsCard(SongProject project) {
+    final hasTitle = oneLine(project.title).isNotEmpty;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _field(
+          'lyrics',
+          'One lyric line per line',
+          (p0, t) => p0.setLyrics(t),
+          minLines: 6,
+          maxLines: 12,
+        ),
+        TextButton.icon(
+          key: const ValueKey('find-lyrics'),
+          onPressed: hasTitle ? () => _findLyrics(project) : null,
+          icon: const Icon(Icons.search),
+          label: const Text('Find lyrics online'),
+        ),
+        if (!hasTitle)
+          const Text(
+            'Fill in the title (and the artist) under Song details first.',
+          ),
+      ],
+    );
+  }
+
   Widget _timing(SongProject project) {
     if (!_hasSource) {
       return const Text(
@@ -548,16 +618,7 @@ class _SongScreenState extends State<SongScreen> {
               padding: const EdgeInsets.all(16),
               children: [
                 _card('Audio', _audio()),
-                _card(
-                  'Lyrics',
-                  _field(
-                    'lyrics',
-                    'One lyric line per line',
-                    (p0, t) => p0.setLyrics(t),
-                    minLines: 6,
-                    maxLines: 12,
-                  ),
-                ),
+                _card('Lyrics', _lyricsCard(project)),
                 _card('Timing', _timing(project)),
                 _card(
                   'Song details',

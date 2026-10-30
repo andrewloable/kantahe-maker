@@ -7,6 +7,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kantahe_maker/jobs.dart';
+import 'package:kantahe_maker/lyrics_lookup.dart';
+import 'package:kantahe_maker/screens/find_lyrics_dialog.dart';
 import 'package:kantahe_maker/pipeline.dart';
 import 'package:kantahe_maker/project.dart';
 import 'package:kantahe_maker/screens/song_screen.dart';
@@ -83,6 +85,7 @@ Future<Song> pumpSong(
   String? corruptJson,
   bool toolsAvailable = true,
   Object? importError,
+  LyricsFinder? lyricsFinder,
 }) async {
   final s = Song()
     ..toolsResult = toolsAvailable ? fakeTools : null
@@ -138,6 +141,7 @@ Future<Song> pumpSong(
           return s.savePath;
         },
         revealFile: (path) async => s.revealed.add(path),
+        lyricsFinder: lyricsFinder,
       ),
     ),
   );
@@ -764,6 +768,130 @@ void main() {
         'xdg-open',
         '/a b',
       ]);
+    });
+  });
+
+  group('find lyrics', () {
+    const found = LyricsCandidate(
+      title: 'T',
+      artist: 'A',
+      album: '',
+      lyrics: 'a\nX\nc',
+    );
+
+    Future<void> open(WidgetTester tester) async {
+      await tester.tap(find.byKey(const ValueKey('find-lyrics')));
+      await tester.pump(const Duration(milliseconds: 400));
+    }
+
+    Future<void> searchAndPick(WidgetTester tester) async {
+      await open(tester);
+      await tester.tap(find.byKey(const ValueKey('lyrics-search')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.tap(find.byKey(const ValueKey('lyrics-result-0')));
+      await tester.pump(const Duration(milliseconds: 400));
+    }
+
+    String lyricsBox(WidgetTester tester) => tester
+        .widget<TextField>(find.byKey(const ValueKey('lyrics')))
+        .controller!
+        .text;
+
+    testWidgets('find_button_needs_a_title', (tester) async {
+      await pumpSong(tester, lyricsFinder: (t, a) async => [found]);
+      final button = find.byKey(const ValueKey('find-lyrics'));
+      expect(tester.widget<TextButton>(button).onPressed, isNull);
+      expect(shown('Fill in the title'), isTrue);
+      await typeInto(tester, 'title', 'T');
+      expect(tester.widget<TextButton>(button).onPressed, isNotNull);
+      expect(shown('Fill in the title'), isFalse);
+      await typeInto(tester, 'title', '   ');
+      expect(tester.widget<TextButton>(button).onPressed, isNull);
+    });
+
+    testWidgets('find_lyrics_fills_the_box_and_saves', (tester) async {
+      final asked = <(String, String)>[];
+      final s = await pumpSong(
+        tester,
+        configure: (p) => p
+          ..title = 'T'
+          ..artist = 'A',
+        lyricsFinder: (t, a) async {
+          asked.add((t, a));
+          return [found];
+        },
+      );
+      await searchAndPick(tester);
+      expect(asked, [('T', 'A')]);
+      expect(shown('Replace the current lyrics'), isFalse);
+      expect(lyricsBox(tester), 'a\nX\nc');
+      await settle(tester, until: () => s.json()['lyrics'] == 'a\nX\nc');
+    });
+
+    testWidgets('find_lyrics_replace_asks', (tester) async {
+      final s = await pumpSong(
+        tester,
+        configure: (p) => p
+          ..title = 'T'
+          ..artist = 'A'
+          ..lyrics = 'old'
+          ..times = [1.0],
+        lyricsFinder: (t, a) async => [found],
+      );
+      await searchAndPick(tester);
+      expect(shown('Replace the current lyrics'), isTrue);
+      await tester.tap(find.byKey(const ValueKey('lyrics-keep')));
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(lyricsBox(tester), 'old');
+      await searchAndPick(tester);
+      await tester.tap(find.byKey(const ValueKey('lyrics-replace')));
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(lyricsBox(tester), 'a\nX\nc');
+      await settle(tester, until: () => s.json()['lyrics'] == 'a\nX\nc');
+    });
+
+    testWidgets('find_lyrics_keeps_taps_of_unchanged_lines', (tester) async {
+      final s = await pumpSong(
+        tester,
+        configure: (p) => p
+          ..title = 'T'
+          ..artist = 'A'
+          ..lyrics = 'a\nb'
+          ..times = [1.0, 2.0],
+        lyricsFinder: (t, a) async => [
+          const LyricsCandidate(
+            title: 'T',
+            artist: 'A',
+            album: '',
+            lyrics: 'a\nX',
+          ),
+        ],
+      );
+      await searchAndPick(tester);
+      await tester.tap(find.byKey(const ValueKey('lyrics-replace')));
+      await tester.pump(const Duration(milliseconds: 400));
+      await settle(tester, until: () => s.json()['lyrics'] == 'a\nX');
+      expect(s.json()['times'], [1.0, null]);
+    });
+
+    testWidgets('find_lyrics_error_does_not_touch_the_lyrics', (tester) async {
+      await pumpSong(
+        tester,
+        configure: (p) => p
+          ..title = 'T'
+          ..lyrics = 'old',
+        lyricsFinder: (t, a) async =>
+            throw const LyricsLookupException('server is busy'),
+      );
+      await open(tester);
+      await tester.tap(find.byKey(const ValueKey('lyrics-search')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(shown('server is busy'), isTrue);
+      await tester.tap(find.text('Close'));
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(lyricsBox(tester), 'old');
     });
   });
 }

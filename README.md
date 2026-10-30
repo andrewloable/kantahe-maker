@@ -11,9 +11,11 @@ See `PLAN.md` for how it works and `CLAUDE.md` for how it is built.
 ## Building releases
 
 The GitHub Actions workflow `.github/workflows/build.yml` builds the app on macOS,
-Linux and Windows (each OS on its own runner) and keeps a zip or tar.gz of each as a
-workflow artifact. It runs when started by hand (workflow_dispatch) or when a `v*` tag is
-pushed. It never publishes a release, pushes or tags.
+Linux and Windows (each OS on its own runner) when a release is published on GitHub (a
+draft release does not start it) and attaches `kantahe-maker-<tag>-macos.zip`,
+`-linux.tar.gz` and `-windows.zip` to that release. A manual run (workflow_dispatch)
+only keeps the archives as workflow artifacts. It never creates a release, pushes or
+tags: you do that by hand.
 
 - macOS builds are unsigned: the first time, right-click the app and choose Open.
 - Windows shows a SmartScreen warning for an unsigned app.
