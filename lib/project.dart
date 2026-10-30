@@ -6,6 +6,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'fs_retry.dart';
+
 class SongProject {
   SongProject({required this.id, required this.inputPath});
 
@@ -150,26 +152,16 @@ class SongProject {
     return turn;
   }
 
-  Future<void> _write(Directory dir) async {
-    // Windows refuses to open or replace a file while another program has it open (a
-    // virus scanner, an indexer, a reader of project.json), usually for a moment: try
-    // the whole save again a few times before giving up.
-    for (var attempt = 1; ; attempt++) {
-      try {
-        await dir.create(recursive: true);
-        final part = File('${dir.path}/project.json.part');
-        await part.writeAsString(
-          const JsonEncoder.withIndent('  ').convert(toJson()),
-          flush: true,
-        );
-        await renameFile(part, '${dir.path}/project.json');
-        return;
-      } on FileSystemException {
-        if (attempt >= 10) rethrow;
-        await Future<void>.delayed(Duration(milliseconds: 50 * attempt));
-      }
-    }
-  }
+  // The whole save is tried again: on Windows the .part file can be held as well.
+  Future<void> _write(Directory dir) => retryBusy(() async {
+    await dir.create(recursive: true);
+    final part = File('${dir.path}/project.json.part');
+    await part.writeAsString(
+      const JsonEncoder.withIndent('  ').convert(toJson()),
+      flush: true,
+    );
+    await renameFile(part, '${dir.path}/project.json');
+  });
 
   /// Moves [from] over [to]. A variable so a test can make it fail; the app never sets it.
   static Future<void> Function(File from, String to) renameFile =

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -176,6 +177,16 @@ void main() {
       Directory('${dir.path}/taken.karmp3').createSync();
       await expectLater(write('taken.karmp3'), throwsA(isA<Exception>()));
       expect(File('${dir.path}/taken.karmp3.part').existsSync(), isFalse);
+    });
+
+    test('zip_rename_retries_while_the_target_is_busy', () async {
+      // A folder at the final path makes the rename fail until it goes away, like a
+      // program holding the file on Windows.
+      final blocker = Directory('${dir.path}/busy.karmp3')..createSync();
+      Timer(const Duration(milliseconds: 150), blocker.deleteSync);
+      final path = await write('busy.karmp3');
+      final archive = ZipDecoder().decodeBytes(File(path).readAsBytesSync());
+      expect(archive.files.map((f) => f.name), ['N.mp3', 'N.lrc', 'N.nfo']);
     });
 
     test('zip_existing_untouched_on_failure', () async {

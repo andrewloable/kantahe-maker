@@ -217,6 +217,8 @@ void main() {
     await settle(
       tester,
       until: () => find.byType(SnackBar).evaluate().isNotEmpty,
+      // the save tries again for about 4.5 s before it gives up
+      seconds: 10,
     );
     expect(find.textContaining('Could not create the song'), findsOneWidget);
     expect(calls.opened, isEmpty);
@@ -241,6 +243,8 @@ void main() {
     await settle(
       tester,
       until: () => find.byType(SnackBar).evaluate().isNotEmpty,
+      // the delete tries again for about 4.5 s before it gives up
+      seconds: 10,
     );
     expect(find.textContaining('Could not delete the song'), findsOneWidget);
     expect(

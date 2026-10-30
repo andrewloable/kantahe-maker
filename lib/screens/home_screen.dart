@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 
 import '../app_dirs.dart';
+import '../fs_retry.dart';
 import '../project.dart';
 import '../widgets/brand_header.dart';
 import 'settings_screen.dart';
@@ -155,7 +156,9 @@ class _HomeScreenState extends State<HomeScreen> {
     );
     if (yes != true) return;
     try {
-      await entry.dir.delete(recursive: true);
+      await retryBusy(() async {
+        if (entry.dir.existsSync()) await entry.dir.delete(recursive: true);
+      });
     } catch (e) {
       _showError('Could not delete the song: $e');
     }

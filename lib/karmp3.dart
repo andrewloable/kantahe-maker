@@ -8,6 +8,8 @@ import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
 
+import 'fs_retry.dart';
+
 final _unsafeChars = RegExp(r'[\\/:*?"<>|\u0000-\u001f]');
 final _whitespace = RegExp(r'[\s\u001c-\u001f]+');
 final _edgeSpaceDots = RegExp(r'^[ .]+|[ .]+$');
@@ -141,9 +143,9 @@ Future<void> writeKarMp3(
       modified: DateTime(1980),
     );
     await part.writeAsBytes(bytes, flush: true);
-    await part.rename(path);
+    await retryBusy(() => part.rename(path));
   } catch (_) {
-    if (part.existsSync()) part.deleteSync();
+    deleteQuietly(part);
     rethrow;
   }
 }

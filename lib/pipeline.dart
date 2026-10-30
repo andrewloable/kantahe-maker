@@ -14,6 +14,7 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
+import 'fs_retry.dart';
 import 'jobs.dart';
 import 'tool_pins.dart';
 import 'tools.dart';
@@ -121,11 +122,6 @@ Future<String> _capture(String exe, List<String> args) async {
   return r.stdout.toString();
 }
 
-void _deleteIfExists(String path) {
-  final f = File(path);
-  if (f.existsSync()) f.deleteSync();
-}
-
 /// Turns [input] (an audio or video file) into work/source.mp3 and work/source.wav.
 /// An MP3 is copied as it is; anything else is encoded. Each file is written under a
 /// ".part" name and renamed when finished, and the partial files are removed if
@@ -147,12 +143,12 @@ Future<void> importSong(
         onLine: onLine);
     await runLogged(t.ffmpeg, sourceWavArgs(input, partWav), onLine: onLine);
   } catch (_) {
-    _deleteIfExists(partMp3);
-    _deleteIfExists(partWav);
+    deleteQuietly(File(partMp3));
+    deleteQuietly(File(partWav));
     rethrow;
   }
-  await File(partMp3).rename(p.join(work.path, 'source.mp3'));
-  await File(partWav).rename(p.join(work.path, 'source.wav'));
+  await retryBusy(() => File(partMp3).rename(p.join(work.path, 'source.mp3')));
+  await retryBusy(() => File(partWav).rename(p.join(work.path, 'source.wav')));
 }
 
 /// The length of an audio file in seconds, from ffprobe.
@@ -210,7 +206,10 @@ class SeparationJob implements CancellableJob {
     final sep = Directory(p.join(_work.path, 'sep'));
     final partMp3 = p.join(_work.path, 'instrumental.part.mp3');
     try {
-      if (sep.existsSync()) sep.deleteSync(recursive: true);
+      // Must succeed: stems left from an earlier run would be picked up.
+      await retryBusy(() async {
+        if (sep.existsSync()) await sep.delete(recursive: true);
+      });
       sep.createSync(recursive: true);
       await _exec(_t.separator,
           separateArgs(p.join(_work.path, 'source.wav'), sep.path, _t.modelDir));
@@ -220,14 +219,14 @@ class SeparationJob implements CancellableJob {
       }
       await _exec(_t.ffmpeg, encodeInstrumentalArgs(instrumental.path, partMp3));
       if (_cancelled) throw const SeparationCancelled();
-      await File(partMp3).rename(p.join(_work.path, 'instrumental.mp3'));
+      await retryBusy(() => File(partMp3).rename(p.join(_work.path, 'instrumental.mp3')));
     } catch (_) {
-      _deleteIfExists(partMp3);
+      deleteQuietly(File(partMp3));
       // A killed program fails with a non-zero exit; that is the cancel, not an error.
       if (_cancelled) throw const SeparationCancelled();
       rethrow;
     } finally {
-      if (sep.existsSync()) sep.deleteSync(recursive: true);
+      deleteQuietly(sep);
     }
   }
 }

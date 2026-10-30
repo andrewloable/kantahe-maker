@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../app_dirs.dart';
+import '../fs_retry.dart';
 import '../tools.dart';
 import 'tools_dialog.dart';
 
@@ -69,7 +70,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   static Future<void> _defaultDeleteTools() async {
     final dir = Directory((await appToolsDir()).root);
-    if (dir.existsSync()) await dir.delete(recursive: true);
+    await retryBusy(() async {
+      if (dir.existsSync()) await dir.delete(recursive: true);
+    });
   }
 
   /// Runs a button's action, shows what went wrong, and reads the status again.

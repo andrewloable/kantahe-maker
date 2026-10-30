@@ -11,6 +11,7 @@ import 'package:archive/archive_io.dart';
 import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
 
+import 'fs_retry.dart';
 import 'tool_pins.dart';
 
 enum HostOs { macos, linux, windows }
@@ -192,22 +193,17 @@ Future<File> download(
       try {
         await out.close();
       } catch (_) {}
-      _deleteIfExists(part.path);
+      deleteQuietly(part);
       rethrow;
     }
     if (digest.value.toString() != expected) {
-      _deleteIfExists(part.path);
+      deleteQuietly(part);
       throw StateError('checksum mismatch for $fileName');
     }
-    return await part.rename(p.join(dest.path, fileName));
+    return await retryBusy(() => part.rename(p.join(dest.path, fileName)));
   } finally {
     if (client == null) http.close(force: true);
   }
-}
-
-void _deleteIfExists(String path) {
-  final f = File(path);
-  if (f.existsSync()) f.deleteSync();
 }
 
 // ---------------------------------------------------------------- extraction
@@ -285,7 +281,7 @@ int _extractSync(String archivePath, String member, String outPath) {
     }
     return _fromTar(tarPath, member, outPath);
   } finally {
-    _deleteIfExists(tarPath);
+    deleteQuietly(File(tarPath));
   }
 }
 
@@ -301,16 +297,16 @@ Future<File> extractMember(File archive, String member, Directory bin) async {
   try {
     status = await Isolate.run(() => _extractSync(archive.path, member, part));
   } catch (_) {
-    _deleteIfExists(part);
+    deleteQuietly(File(part));
     rethrow;
   }
   if (status != _found) {
-    _deleteIfExists(part);
+    deleteQuietly(File(part));
     throw StateError(status == _unsupported
         ? 'unsupported archive type: ${p.basename(archive.path)}'
         : '$member not found in ${p.basename(archive.path)}');
   }
-  final out = await File(part).rename(target);
+  final out = await retryBusy(() => File(part).rename(target));
   if (!Platform.isWindows) {
     final r = await Process.run('chmod', ['+x', out.path]);
     if (r.exitCode != 0) throw StateError('chmod failed for ${out.path}: ${r.stderr}');
@@ -485,8 +481,7 @@ Future<void> installTools(
     }
   } finally {
     if (client == null) http.close(force: true);
-    final dir = Directory(d.downloads);
-    if (dir.existsSync()) dir.deleteSync(recursive: true);
+    deleteQuietly(Directory(d.downloads));
   }
   final after = toolStatus(d, os, env, extraDirs: extraDirs);
   if (after['audio-separator'] == null || after['model'] == null) {

@@ -402,6 +402,20 @@ void main() {
 
     bool isExecutable(File f) => f.statSync().mode & 0x49 != 0;
 
+    test('extract_rename_retries_while_the_target_is_busy', () async {
+      final a = write(
+        'a.zip',
+        ZipEncoder().encodeBytes(archiveOf({'bin/ffmpeg': 'x'})),
+      );
+      final bin = Directory('${tmp.path}/bin')..createSync();
+      // A folder where the program goes makes the rename fail until it goes away, like
+      // a virus scanner holding the file on Windows.
+      final blocker = Directory('${bin.path}/ffmpeg')..createSync();
+      Timer(const Duration(milliseconds: 150), blocker.deleteSync);
+      final out = await extractMember(a, 'ffmpeg', bin);
+      expect(out.readAsStringSync(), 'x');
+    });
+
     test('extract_tar_gz_nested', () async {
       final tar = TarEncoder().encodeBytes(
         archiveOf({'ffmpeg-n7/readme.txt': 'no', 'ffmpeg-n7/bin/ffmpeg': 'x'}),
