@@ -1,0 +1,80 @@
+# Builds Kantahe Maker on each OS and keeps the result as a workflow artifact. It never
+# publishes a release, pushes or tags (see CLAUDE.md); the owner does that by hand.
+name: build
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v6.1.0
+        with:
+          persist-credentials: false
+      - uses: subosito/flutter-action@v2.22.0
+        with:
+          flutter-version: '3.47.5'
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+      - run: flutter build macos --release
+      # The app name contains a space, so the path is quoted.
+      - run: ditto -c -k --keepParent "build/macos/Build/Products/Release/Kantahe Maker.app" kantahe-maker-macos.zip
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: kantahe-maker-macos
+          path: kantahe-maker-macos.zip
+          if-no-files-found: error
+
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.1.0
+        with:
+          persist-credentials: false
+      - run: sudo apt-get update && sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libmpv-dev
+      - uses: subosito/flutter-action@v2.22.0
+        with:
+          flutter-version: '3.47.5'
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+      - run: flutter build linux --release
+      - run: tar -czf kantahe-maker-linux.tar.gz -C build/linux/x64/release/bundle .
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: kantahe-maker-linux
+          path: kantahe-maker-linux.tar.gz
+          if-no-files-found: error
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6.1.0
+        with:
+          persist-credentials: false
+      - uses: subosito/flutter-action@v2.22.0
+        with:
+          flutter-version: '3.47.5'
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+      - run: flutter build windows --release
+      - run: Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath kantahe-maker-windows.zip
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: kantahe-maker-windows
+          path: kantahe-maker-windows.zip
+          if-no-files-found: error

@@ -1,5 +1,9 @@
 # Agent Instructions
 
+**Git: manual commits and pushes only.** Never run `git commit`, `git push` or `bd dolt push`
+unless the user explicitly asks for that exact action in their current message. This
+overrides any "Session Completion" text below. Project context: `CLAUDE.md`, `PLAN.md`.
+
 This project uses **bd** (beads) for issue tracking. Run `bd prime` for full workflow context.
 
 > **Architecture in one line:** Issues live in a local Dolt database

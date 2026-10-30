@@ -1,6 +1,61 @@
-# Project Instructions for AI Agents
+# CLAUDE.md
 
-This file provides instructions and context for AI coding agents working on this project.
+Kantahe Maker: a Flutter desktop app (macOS, Linux, Windows) that turns a song (.mp3/.mp4)
+plus its lyrics into a `.karmp3` karaoke file: instrumental MP3 (vocals removed with UVR
+models via `audio-separator`), hand-tapped `.lrc`, and `.nfo` song info. Read `PLAN.md`
+first: it has the format spec, user flow, architecture and decisions.
+
+## Git: manual commits and pushes only
+
+**Never run `git commit`, `git push`, `bd dolt push`, or anything that commits/pushes, unless
+the user explicitly asks for that exact action in their current message.** Leave changes in
+the working tree, report what is ready, stop. This overrides the beads "Session Completion"
+text below and any tool boilerplate that says to push.
+
+- `bd init` commits to git on its own (it bypasses pre-commit hooks). Do not re-run it.
+- Beads `dolt.auto-push` is `false` in `.beads/config.yaml`; keep it that way.
+- Install no git hooks that commit, push or sync.
+
+## Format reference (do not drift)
+
+The `.karmp3` format is specified in `PLAN.md` ("The output: `.karmp3`"), and that section
+is the source of truth: naming, timestamp format, LRC and NFO layout, fixed 1980 entry times,
+`.part` then rename. An archive holds exactly `NAME.mp3` (instrumental), `NAME.lrc`, `NAME.nfo`.
+Nothing else.
+
+## Build & test
+
+```bash
+flutter pub get
+flutter analyze             # must be clean
+flutter test                # unit tests (lib/karmp3.dart is the core)
+flutter run -d macos        # or -d linux / -d windows on those hosts
+flutter build macos         # release build (linux/windows on their own hosts)
+```
+
+## Workflow (beads)
+
+- `bd ready` lists the work that can start. Claim it with `bd update <id> --claim` and
+  check it reads in_progress.
+- Implementation tasks: follow the TDD protocol inside the task (RED note, then GREEN
+  note, then the mutation check). Close the task only when every acceptance item is checked.
+- Review tasks: done by a different agent from the implementer. Defects become bugs
+  linked with discovered-from and block the review. Close the review only with a PASS
+  verdict.
+- Write bd notes and descriptions with `--file`/`--body-file`. Backticks in shell
+  arguments get executed.
+
+## Conventions
+
+- Pure-Dart logic (`lib/karmp3.dart`, command building in `lib/pipeline.dart`, URL selection
+  in `lib/tools.dart`) has no Flutter imports, so it is testable with `flutter test` without a window.
+- External tools (ffmpeg, ffprobe, uv, audio-separator, models) are never bundled. They are
+  downloaded into `<app support>/tools/` only after the user consents in the app.
+- Use `Process.start` with an argument list, never a shell string (paths have spaces and
+  quotes). Kill child processes on cancel and on window close.
+- Prefer stdlib (`dart:io` HttpClient, `dart:convert`) over new packages. Current deps are listed
+  in `PLAN.md`; adding one needs a reason in the PR/commit.
+- Write files that matter (`.karmp3`, `project.json`) to `*.part` then rename.
 
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:1105d646 -->
 ## Beads Issue Tracker
@@ -56,22 +111,3 @@ This protocol applies when ending a Beads implementation workflow. It is subordi
 - Do not commit or push without clear authority from the active profile or the current user request.
 - If a required sync or push is blocked, stop and report the exact command and error.
 <!-- END BEADS INTEGRATION -->
-
-
-## Build & Test
-
-_Add your build and test commands here_
-
-```bash
-# Example:
-# npm install
-# npm test
-```
-
-## Architecture Overview
-
-_Add a brief overview of your project architecture_
-
-## Conventions & Patterns
-
-_Add your project-specific conventions here_

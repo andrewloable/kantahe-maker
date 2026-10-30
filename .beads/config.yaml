@@ -73,3 +73,5 @@
 
 sync:
     remote: "git+ssh://git@github.com-loabletech/andrewloable/kantahe-maker.git"
+dolt:
+    auto-push: false
