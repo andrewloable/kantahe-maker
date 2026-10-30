@@ -101,14 +101,17 @@ void main() {
         );
 
     test('find_order', () {
-      File('${tools.bin}/ffmpeg').writeAsStringSync('t');
-      File('${pathDir.path}/ffmpeg').writeAsStringSync('p');
-      File('${extra.path}/ffmpeg').writeAsStringSync('e');
-      expect(find('ffmpeg'), samePath('${tools.bin}/ffmpeg'));
-      File('${tools.bin}/ffmpeg').deleteSync();
-      expect(find('ffmpeg'), samePath('${pathDir.path}/ffmpeg'));
-      File('${pathDir.path}/ffmpeg').deleteSync();
-      expect(find('ffmpeg'), samePath('${extra.path}/ffmpeg'));
+      // A Windows PATH is split on ';' (a drive letter has a ':'), so use the host's rules.
+      final os = Platform.isWindows ? HostOs.windows : HostOs.macos;
+      final name = exeName('ffmpeg', os);
+      File('${tools.bin}/$name').writeAsStringSync('t');
+      File('${pathDir.path}/$name').writeAsStringSync('p');
+      File('${extra.path}/$name').writeAsStringSync('e');
+      expect(find('ffmpeg', os: os), samePath('${tools.bin}/$name'));
+      File('${tools.bin}/$name').deleteSync();
+      expect(find('ffmpeg', os: os), samePath('${pathDir.path}/$name'));
+      File('${pathDir.path}/$name').deleteSync();
+      expect(find('ffmpeg', os: os), samePath('${extra.path}/$name'));
     });
 
     test('find_windows_path_sep', () {
