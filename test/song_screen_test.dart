@@ -73,6 +73,15 @@ class Song {
   final revealed = <String>[];
   final player = FakePlayer();
 
+  /// What is on disk, for a failure message.
+  String describe() => [
+    if (dir.existsSync())
+      for (final e in dir.listSync())
+        '${e.path}: ${e is File ? '${e.lengthSync()} bytes' : 'dir'}',
+    if (File('${dir.path}/project.json').existsSync())
+      readText(File('${dir.path}/project.json')),
+  ].join('\n');
+
   Map<String, dynamic> json() =>
       jsonDecode(readText(File('${dir.path}/project.json')))
           as Map<String, dynamic>;
@@ -343,6 +352,7 @@ void main() {
         await settle(
           tester,
           until: () => s.json()['title'] == 'Typed just now',
+          describe: s.describe,
         );
         await settle(tester, until: () => jobs.length == 0);
       },
@@ -362,7 +372,11 @@ void main() {
         instrumental: true,
       );
       await typeInto(tester, 'lyrics', 'a\nX');
-      await settle(tester, until: () => s.json()['lyrics'] == 'a\nX');
+      await settle(
+        tester,
+        until: () => s.json()['lyrics'] == 'a\nX',
+        describe: s.describe,
+      );
       expect(s.json()['times'], [1.0, null]);
     });
 
@@ -372,7 +386,11 @@ void main() {
       await typeInto(tester, 'artist', 'Singer');
       await typeInto(tester, 'composer', 'Comp');
       await typeInto(tester, 'lyricist', 'Lyr');
-      await settle(tester, until: () => s.json()['lyricist'] == 'Lyr');
+      await settle(
+        tester,
+        until: () => s.json()['lyricist'] == 'Lyr',
+        describe: s.describe,
+      );
       expect(s.json()['title'], 'Song');
       expect(s.json()['artist'], 'Singer');
       expect(s.json()['composer'], 'Comp');
@@ -388,9 +406,17 @@ void main() {
             .text,
         '123',
       );
-      await settle(tester, until: () => s.json()['number'] == 123);
+      await settle(
+        tester,
+        until: () => s.json()['number'] == 123,
+        describe: s.describe,
+      );
       await typeInto(tester, 'number', '');
-      await settle(tester, until: () => s.json()['number'] == null);
+      await settle(
+        tester,
+        until: () => s.json()['number'] == null,
+        describe: s.describe,
+      );
     });
 
     testWidgets('title_and_artist_are_single_line_fields', (tester) async {
@@ -447,6 +473,7 @@ void main() {
       await settle(
         tester,
         until: () => (s.json()['times'] as List).any((t) => t != null),
+        describe: s.describe,
       );
       expect(s.json()['times'], [4.2, null]);
     });
@@ -471,7 +498,11 @@ void main() {
         find.text('a'),
       ); // select(0) on the old lines: would clear [1, ...]
       await tester.pump();
-      await settle(tester, until: () => s.json()['lyrics'] == 'a\nX\nc');
+      await settle(
+        tester,
+        until: () => s.json()['lyrics'] == 'a\nX\nc',
+        describe: s.describe,
+      );
       expect(s.json()['times'], [
         1.0,
         null,
@@ -490,7 +521,11 @@ void main() {
         -0.25,
       );
       await tester.pump();
-      await settle(tester, until: () => s.json()['offset'] == -0.25);
+      await settle(
+        tester,
+        until: () => s.json()['offset'] == -0.25,
+        describe: s.describe,
+      );
     });
 
     testWidgets('word_times_are_saved', (tester) async {
@@ -515,6 +550,7 @@ void main() {
         until: () =>
             s.json()['wordTimes'] != null &&
             (s.json()['wordTimes'] as List).any((w) => w != null),
+        describe: s.describe,
       );
       expect(s.json()['wordTimes'], [
         [1.0, 1.5],
@@ -538,7 +574,11 @@ void main() {
         instrumental: true,
       );
       await typeInto(tester, 'lyrics', 'a b\nX Y');
-      await settle(tester, until: () => s.json()['lyrics'] == 'a b\nX Y');
+      await settle(
+        tester,
+        until: () => s.json()['lyrics'] == 'a b\nX Y',
+        describe: s.describe,
+      );
       expect(s.json()['wordTimes'], [
         [1.0, 1.5],
         null,
@@ -558,7 +598,11 @@ void main() {
         );
         await typeInto(tester, 'lyrics', 'a\nX\nc');
         await settle(tester, until: () => find.text('X').evaluate().isNotEmpty);
-        await settle(tester, until: () => s.json()['lyrics'] == 'a\nX\nc');
+        await settle(
+          tester,
+          until: () => s.json()['lyrics'] == 'a\nX\nc',
+          describe: s.describe,
+        );
         expect(find.text('c'), findsOneWidget);
         expect(
           find.text('00:01.00'),
@@ -832,7 +876,11 @@ void main() {
       expect(asked, [('T', 'A')]);
       expect(shown('Replace the current lyrics'), isFalse);
       expect(lyricsBox(tester), 'a\nX\nc');
-      await settle(tester, until: () => s.json()['lyrics'] == 'a\nX\nc');
+      await settle(
+        tester,
+        until: () => s.json()['lyrics'] == 'a\nX\nc',
+        describe: s.describe,
+      );
     });
 
     testWidgets('find_lyrics_replace_asks', (tester) async {
@@ -854,7 +902,11 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('lyrics-replace')));
       await tester.pump(const Duration(milliseconds: 400));
       expect(lyricsBox(tester), 'a\nX\nc');
-      await settle(tester, until: () => s.json()['lyrics'] == 'a\nX\nc');
+      await settle(
+        tester,
+        until: () => s.json()['lyrics'] == 'a\nX\nc',
+        describe: s.describe,
+      );
     });
 
     testWidgets('find_lyrics_keeps_taps_of_unchanged_lines', (tester) async {
@@ -877,7 +929,11 @@ void main() {
       await searchAndPick(tester);
       await tester.tap(find.byKey(const ValueKey('lyrics-replace')));
       await tester.pump(const Duration(milliseconds: 400));
-      await settle(tester, until: () => s.json()['lyrics'] == 'a\nX');
+      await settle(
+        tester,
+        until: () => s.json()['lyrics'] == 'a\nX',
+        describe: s.describe,
+      );
       expect(s.json()['times'], [1.0, null]);
     });
 

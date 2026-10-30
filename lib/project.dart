@@ -151,16 +151,17 @@ class SongProject {
   }
 
   Future<void> _write(Directory dir) async {
-    await dir.create(recursive: true);
-    final part = File('${dir.path}/project.json.part');
-    await part.writeAsString(
-      const JsonEncoder.withIndent('  ').convert(toJson()),
-      flush: true,
-    );
-    // Windows refuses to replace a file while another program has it open (a virus
-    // scanner, an indexer), usually for a moment: try again a few times before giving up.
+    // Windows refuses to open or replace a file while another program has it open (a
+    // virus scanner, an indexer, a reader of project.json), usually for a moment: try
+    // the whole save again a few times before giving up.
     for (var attempt = 1; ; attempt++) {
       try {
+        await dir.create(recursive: true);
+        final part = File('${dir.path}/project.json.part');
+        await part.writeAsString(
+          const JsonEncoder.withIndent('  ').convert(toJson()),
+          flush: true,
+        );
         await renameFile(part, '${dir.path}/project.json');
         return;
       } on FileSystemException {

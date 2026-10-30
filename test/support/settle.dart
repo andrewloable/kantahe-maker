@@ -26,8 +26,16 @@ Future<void> settle(
     }
   }
   if (until != null) {
+    // Messages on screen (a failed save shows "Could not save: <error>").
+    final snacks = [
+      for (final t in tester.widgetList<Text>(
+        find.descendant(of: find.byType(SnackBar), matching: find.byType(Text)),
+      ))
+        t.data ?? '',
+    ];
     fail(
       'the screen did not reach the expected state within 5 s'
+      '\nsnack bars: $snacks'
       '${describe == null ? '' : '\n${describe()}'}',
     );
   }

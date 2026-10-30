@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -254,6 +255,16 @@ void main() {
       await expectLater(p.save(dir), throwsA(isA<FileSystemException>()));
       blocker.deleteSync();
       await p.save(dir);
+      expectSame(await SongProject.load(dir), full());
+    });
+
+    test('save_retries_when_the_part_file_cannot_be_written_for_a_moment', () async {
+      final dir = Directory('${tmp.path}/p1')..createSync();
+      // A directory where the .part file goes makes the write fail until it is removed,
+      // like a scanner holding the file on Windows.
+      final blocker = Directory('${dir.path}/project.json.part')..createSync();
+      Timer(const Duration(milliseconds: 150), blocker.deleteSync);
+      await full().save(dir);
       expectSame(await SongProject.load(dir), full());
     });
 
