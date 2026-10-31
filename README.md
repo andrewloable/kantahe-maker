@@ -8,6 +8,15 @@ info. A Flutter desktop app for macOS, Linux and Windows.
 
 See `PLAN.md` for how it works and `CLAUDE.md` for how it is built.
 
+## How it works
+
+Pick an .mp3 or .mp4 with **New song**; the song then goes through six steps, one at a time:
+**Song** (the audio is read), **Remove vocals** (runs in the background while you go on),
+**Details** (title and artist, filled from the file's tags), **Lyrics** (found online or
+pasted), **Timing** (tap along) and **Export** (the `.karmp3`). The Lyrics step sends the
+song's title and artist to lrclib.net to find lyrics; nothing else leaves the computer apart
+from the tool downloads you agree to.
+
 ## Building releases
 
 The GitHub Actions workflow `.github/workflows/build.yml` builds the app on macOS,

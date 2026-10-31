@@ -19,7 +19,7 @@ List<String> exportBlockers(SongProject p, {required bool instrumentalReady}) {
   final lines = p.lyricLines();
   return [
     if (!instrumentalReady) 'Vocal removal is not finished',
-    if (lines.isEmpty) 'Add lyrics' else ..._timingBlockers(lines, p),
+    if (lines.isEmpty) 'Add lyrics' else ...timingBlockers(p),
     if (oneLine(p.title).isEmpty) 'Title is required',
     if (oneLine(p.artist).isEmpty) 'Artist is required',
   ];
@@ -30,7 +30,11 @@ List<double?> _tapsFor(List<String> lines, SongProject p) => [
   for (var i = 0; i < lines.length; i++) i < p.times.length ? p.times[i] : null,
 ];
 
-List<String> _timingBlockers(List<String> lines, SongProject p) {
+/// What stops the timing: untapped lines or taps out of order. Empty when there are no
+/// lyric lines (exportBlockers says "Add lyrics" for that).
+List<String> timingBlockers(SongProject p) {
+  final lines = p.lyricLines();
+  if (lines.isEmpty) return const [];
   final times = _tapsFor(lines, p);
   final untapped = times.where((t) => t == null).length;
   if (untapped > 0) return ['$untapped line(s) not tapped yet'];

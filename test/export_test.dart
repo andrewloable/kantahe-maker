@@ -67,6 +67,11 @@ void main() {
       final p = ready(times: [1, 2, 3]);
       expect(exportBlockers(p, instrumentalReady: true), isEmpty);
     });
+
+    test('timing_blockers_is_public', () {
+      expect(timingBlockers(ready(times: [1, null])), ['1 line(s) not tapped yet']);
+      expect(timingBlockers(ready(lyrics: '')), isEmpty);
+    });
   });
 
   group('exportKarMp3', () {

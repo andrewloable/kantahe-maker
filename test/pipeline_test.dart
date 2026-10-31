@@ -27,6 +27,11 @@ void main() {
       expect(hasSeq(a, ['-of', 'csv=p=0']), isTrue);
       expect(a.last, 'in put.mp4');
     });
+    test('args_probe_tags', () {
+      expect(probeTagsArgs('in.mp4'), [
+        '-v', 'error', '-show_entries', 'format_tags', '-of', 'json', 'in.mp4',
+      ]);
+    });
     test('duration_args', () {
       final a = durationArgs('s.mp3');
       expect(hasSeq(a, ['-show_entries', 'format=duration']), isTrue);
@@ -142,6 +147,28 @@ void main() {
     });
   });
 
+  group('tags', () {
+    test('parse_tags_lower', () {
+      expect(parseTags('{"format":{"tags":{"title":"Song","artist":"Singer"}}}'),
+          (title: 'Song', artist: 'Singer'));
+    });
+    test('parse_tags_upper', () {
+      expect(parseTags('{"format":{"tags":{"TITLE":"Song","ARTIST":"Singer"}}}'),
+          (title: 'Song', artist: 'Singer'));
+    });
+    test('parse_tags_missing', () {
+      expect(parseTags('{"format":{}}'), (title: '', artist: ''));
+    });
+    test('parse_tags_garbage', () {
+      expect(parseTags('not json'), (title: '', artist: ''));
+      expect(parseTags('[]'), (title: '', artist: ''));
+      expect(parseTags('{"format":{"tags":{"title":5}}}'), (title: '', artist: ''));
+    });
+    test('parse_tags_one_line', () {
+      expect(parseTags('{"format":{"tags":{"title":"A\\n B"}}}').title, 'A B');
+    });
+  });
+
   group('parseDuration', () {
     test('parse_duration', () {
       expect(parseDuration('295.123456\n'), 295.123456);
@@ -222,6 +249,32 @@ void main() {
       .map((e) => e.path.substring(d.path.length + 1))
       .where((n) => n.contains('.part.') || n.endsWith('.part'))
       .toList();
+
+  group('readTags', () {
+    late Directory tmp;
+    setUp(() => tmp = Directory.systemTemp.createTempSync('pipe_tags'));
+    tearDown(() => tmp.deleteSync(recursive: true));
+
+    test('read_tags_real_file', () async {
+      final mp3 = '${tmp.path}/tagged.mp3';
+      ff([
+        '-f', 'lavfi', '-i', 'sine=frequency=440:duration=1',
+        '-metadata', 'title=Song', '-metadata', 'artist=Singer',
+        mp3,
+      ]);
+      expect(await readTags(realTools(), mp3), (title: 'Song', artist: 'Singer'));
+    }, skip: noFfmpeg);
+
+    test('read_tags_failure_gives_empty', () async {
+      const t = ToolPaths(
+        ffmpeg: '/nonexistent/ffmpeg',
+        ffprobe: '/nonexistent/ffprobe',
+        separator: '/nonexistent/sep',
+        modelDir: '/nonexistent/models',
+      );
+      expect(await readTags(t, '${tmp.path}/x.mp3'), (title: '', artist: ''));
+    });
+  });
 
   group('importSong', () {
     late Directory tmp;

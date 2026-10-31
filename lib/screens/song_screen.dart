@@ -14,8 +14,9 @@ import '../lyrics_lookup.dart';
 import '../pipeline.dart';
 import '../project.dart';
 import '../tools.dart';
+import '../wizard.dart';
 import 'tap_screen.dart';
-import 'find_lyrics_dialog.dart';
+import 'lyrics_search_panel.dart';
 import 'tools_dialog.dart';
 
 /// The command that shows [path] in the system file manager (a program and its
@@ -25,6 +26,9 @@ List<String> revealCommand(HostOs os, String path) => switch (os) {
   HostOs.windows => ['explorer', '/select,$path'],
   HostOs.linux => ['xdg-open', p.dirname(path)],
 };
+
+/// The height below which the timing step scrolls: the tap screen needs about 300 px.
+const _minTapHeight = 360.0;
 
 enum _Stage {
   checking,
@@ -37,8 +41,9 @@ enum _Stage {
   cancelled,
 }
 
-/// One song from its input file to an exported .karmp3: reads the song, removes the
-/// vocals in the background, takes the lyrics and the taps, and exports. Everything that
+/// One song from its input file to an exported .karmp3, as a wizard with one step on
+/// screen at a time (see [WizardStep]): reads the song, removes the vocals in the
+/// background, takes the details, the lyrics and the taps, and exports. Everything that
 /// touches the machine can be replaced in tests.
 class SongScreen extends StatefulWidget {
   const SongScreen({
@@ -52,6 +57,7 @@ class SongScreen extends StatefulWidget {
     this.revealFile,
     this.createPlayer,
     this.lyricsFinder,
+    this.tagsFn,
     this.saveDelay = const Duration(milliseconds: 500),
   });
 
@@ -81,6 +87,13 @@ class SongScreen extends StatefulWidget {
   /// Looks lyrics up; null means LRCLIB.
   final LyricsFinder? lyricsFinder;
 
+  /// Reads the title and artist from the input's tags; null means [readTags].
+  final Future<({String title, String artist})> Function(
+    ToolPaths tools,
+    String input,
+  )?
+  tagsFn;
+
   /// How long typing pauses before it is saved.
   final Duration saveDelay;
 
@@ -104,6 +117,14 @@ class _SongScreenState extends State<SongScreen> {
   ToolPaths? _tools;
   CancellableJob? _job;
   bool _exporting = false;
+
+  /// Where the last export of this visit was written, for "Show in folder".
+  String? _exportedPath;
+  WizardStep _step = WizardStep.song;
+
+  /// The title and artist of the last automatic lyrics search, so coming back to the
+  /// Lyrics step does not search the same thing again.
+  String? _lastAutoSearch;
 
   String _file(String name) => p.join(widget.dir.path, name);
 
@@ -155,6 +176,7 @@ class _SongScreenState extends State<SongScreen> {
     setState(() {
       _project = project;
       _tapLines = project.lyricLines();
+      _step = openingStep(_facts);
     });
     unawaited(_runAudio());
   }
@@ -208,6 +230,7 @@ class _SongScreenState extends State<SongScreen> {
       }
       if (!mounted) return;
       setState(() => _hasSource = true);
+      unawaited(_prefillFromTags(tools));
     }
 
     if (_hasInstrumental) {
@@ -234,6 +257,29 @@ class _SongScreenState extends State<SongScreen> {
     } finally {
       if (identical(_job, job)) _job = null;
     }
+  }
+
+  /// Fills a blank title or artist from the file's tags. A typed value is never
+  /// replaced, and a failure is ignored: the tags only save some typing.
+  Future<void> _prefillFromTags(ToolPaths tools) async {
+    final project = _project!;
+    bool blank(String s) => oneLine(s).isEmpty;
+    if (!blank(project.title) && !blank(project.artist)) return;
+    final ({String title, String artist}) tags;
+    try {
+      tags = await (widget.tagsFn ?? readTags)(tools, project.inputPath);
+    } catch (_) {
+      return;
+    }
+    if (!mounted) return;
+    final title = blank(project.title) && tags.title.isNotEmpty;
+    final artist = blank(project.artist) && tags.artist.isNotEmpty;
+    if (!title && !artist) return;
+    setState(() {
+      if (title) _controllers['title']!.text = project.title = tags.title;
+      if (artist) _controllers['artist']!.text = project.artist = tags.artist;
+    });
+    _saveNow();
   }
 
   static Future<void> _defaultImport(
@@ -284,6 +330,22 @@ class _SongScreenState extends State<SongScreen> {
     _scheduleSave();
   }
 
+  // ------------------------------------------------------------------- wizard
+
+  WizardFacts get _facts => WizardFacts(
+    project: _project!,
+    hasSource: _hasSource,
+    hasInstrumental: _hasInstrumental,
+    separating: _stage == _Stage.separating,
+  );
+
+  void _goTo(WizardStep step) {
+    // Typing not saved yet is saved now, so the tap screen gets the new lyric lines
+    // before it can be tapped.
+    if (_savePending) _saveNow();
+    setState(() => _step = step);
+  }
+
   // ------------------------------------------------------------------- export
 
   Future<String?> _defaultSaveLocation(String suggestedName) async {
@@ -303,13 +365,17 @@ class _SongScreenState extends State<SongScreen> {
     await Process.run(command.first, command.sublist(1));
   }
 
+  /// The suggested name of the exported file.
+  static String _fileName(SongProject project) =>
+      '${karMp3Name(number: project.number, artist: oneLine(project.artist), title: oneLine(project.title))}.karmp3';
+
   Future<void> _export() async {
     final project = _project!;
     setState(() => _exporting = true);
     try {
-      final name =
-          '${karMp3Name(number: project.number, artist: oneLine(project.artist), title: oneLine(project.title))}.karmp3';
-      final chosen = await (widget.saveLocation ?? _defaultSaveLocation)(name);
+      final chosen = await (widget.saveLocation ?? _defaultSaveLocation)(
+        _fileName(project),
+      );
       if (chosen == null) return;
       final dest = chosen.toLowerCase().endsWith('.karmp3')
           ? chosen
@@ -332,6 +398,7 @@ class _SongScreenState extends State<SongScreen> {
       );
       await exportKarMp3(project, widget.dir, dest, durationSeconds: seconds);
       if (!mounted) return;
+      setState(() => _exportedPath = dest);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Exported ${p.basename(dest)}'),
@@ -359,21 +426,6 @@ class _SongScreenState extends State<SongScreen> {
     }
     return p.basename(project.inputPath);
   }
-
-  Widget _card(String title, Widget child) => Card(
-    margin: const EdgeInsets.only(bottom: 16),
-    child: Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(title, style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 8),
-          child,
-        ],
-      ),
-    ),
-  );
 
   Widget _audio() {
     switch (_stage) {
@@ -482,17 +534,10 @@ class _SongScreenState extends State<SongScreen> {
     ),
   );
 
-  /// Looks the lyrics up on LRCLIB (after the dialog's consent) and puts the one the user
-  /// picks into the lyrics box, asking first when there are lyrics already.
-  Future<void> _findLyrics(SongProject project) async {
-    final picked = await showFindLyricsDialog(
-      context,
-      title: project.title,
-      artist: project.artist,
-      finder: widget.lyricsFinder ?? findLyrics,
-    );
-    if (picked == null || !mounted) return;
-    if (project.lyrics.trim().isNotEmpty) {
+  /// Puts the lyrics the user picked into the lyrics box, asking first when the box
+  /// holds lyrics already.
+  Future<void> _pickLyrics(LyricsCandidate picked) async {
+    if (_controllers['lyrics']!.text.trim().isNotEmpty) {
       final replace = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
@@ -520,11 +565,23 @@ class _SongScreenState extends State<SongScreen> {
     _edited((p0) => p0.setLyrics(picked.lyrics));
   }
 
-  Widget _lyricsCard(SongProject project) {
-    final hasTitle = oneLine(project.title).isNotEmpty;
+  Widget _lyricsStep(SongProject project) {
+    // Searches by itself once per title and artist, and only for an empty box.
+    final searchKey = '${oneLine(project.title)}|${oneLine(project.artist)}';
+    final autoSearch =
+        project.lyricLines().isEmpty && searchKey != _lastAutoSearch;
+    if (autoSearch) _lastAutoSearch = searchKey;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        LyricsSearchPanel(
+          title: project.title,
+          artist: project.artist,
+          finder: widget.lyricsFinder ?? findLyrics,
+          onPicked: (picked) => unawaited(_pickLyrics(picked)),
+          autoSearch: autoSearch,
+        ),
+        const SizedBox(height: 16),
         _field(
           'lyrics',
           'One lyric line per line',
@@ -532,16 +589,6 @@ class _SongScreenState extends State<SongScreen> {
           minLines: 6,
           maxLines: 12,
         ),
-        TextButton.icon(
-          key: const ValueKey('find-lyrics'),
-          onPressed: hasTitle ? () => _findLyrics(project) : null,
-          icon: const Icon(Icons.search),
-          label: const Text('Find lyrics online'),
-        ),
-        if (!hasTitle)
-          const Text(
-            'Fill in the title (and the artist) under Song details first.',
-          ),
       ],
     );
   }
@@ -555,49 +602,295 @@ class _SongScreenState extends State<SongScreen> {
     if (_tapLines.isEmpty) {
       return const Text('Add the lyrics above, then tap them here.');
     }
-    return SizedBox(
-      height: 560,
-      child: TapScreen(
-        key: ValueKey(_tapLines.join('\n')),
-        lines: _tapLines,
-        sourcePath: _file('source.mp3'),
-        instrumentalPath: _hasInstrumental ? _file('instrumental.mp3') : null,
-        initialTimes: project.times,
-        initialWordTimes: project.wordTimes,
-        initialOffset: project.offset,
-        createPlayer: widget.createPlayer,
-        onWordTimesChanged: (wordTimes) {
-          if (!listEquals(_tapLines, project.lyricLines())) return;
-          setState(() => project.wordTimes = wordTimes);
-          _saveNow();
-        },
-        onChanged: (times, offset) {
-          // A tap in the moment between typing and the screen catching up would be
-          // matched to the wrong lines: leave it out.
-          if (!listEquals(_tapLines, project.lyricLines())) return;
-          setState(() {
-            project.times = List.of(times);
-            project.offset = offset;
-          });
-          _saveNow();
-        },
+    final blockers = timingBlockers(project);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          blockers.isEmpty
+              ? 'All ${project.lyricLines().length} lines tapped'
+              : blockers.first,
+          key: const ValueKey('timing-status'),
+        ),
+        const SizedBox(height: 8),
+        Expanded(child: _tapScreen(project)),
+      ],
+    );
+  }
+
+  Widget _tapScreen(SongProject project) {
+    return TapScreen(
+      key: ValueKey(_tapLines.join('\n')),
+      lines: _tapLines,
+      sourcePath: _file('source.mp3'),
+      instrumentalPath: _hasInstrumental ? _file('instrumental.mp3') : null,
+      initialTimes: project.times,
+      initialWordTimes: project.wordTimes,
+      initialOffset: project.offset,
+      createPlayer: widget.createPlayer,
+      onWordTimesChanged: (wordTimes) {
+        if (!listEquals(_tapLines, project.lyricLines())) return;
+        setState(() => project.wordTimes = wordTimes);
+        _saveNow();
+      },
+      onChanged: (times, offset) {
+        // A tap in the moment between typing and the screen catching up would be
+        // matched to the wrong lines: leave it out.
+        if (!listEquals(_tapLines, project.lyricLines())) return;
+        setState(() {
+          project.times = List.of(times);
+          project.offset = offset;
+        });
+        _saveNow();
+      },
+    );
+  }
+
+  Widget _exportStep(SongProject project, WizardFacts facts) {
+    final ready = exportBlockers(
+      project,
+      instrumentalReady: _hasInstrumental,
+    ).isEmpty;
+    final exported = _exportedPath;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'File name: ${_fileName(project)}',
+          key: const ValueKey('export-name'),
+        ),
+        const SizedBox(height: 12),
+        // Each thing still missing, with the way to it.
+        for (final step in WizardStep.values.take(WizardStep.export.index))
+          if (!stepDone(step, facts))
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    step == WizardStep.vocals && facts.separating
+                        ? 'Remove vocals: still running'
+                        : '${stepLabel(step)}: not finished',
+                  ),
+                ),
+                TextButton(
+                  key: ValueKey('fix-${step.name}'),
+                  onPressed: () => _goTo(step),
+                  child: Text('Go to ${stepLabel(step)}'),
+                ),
+              ],
+            ),
+        const SizedBox(height: 8),
+        FilledButton(
+          onPressed: ready && !_exporting ? _export : null,
+          child: const Text('Export .karmp3'),
+        ),
+        if (exported != null) ...[
+          const SizedBox(height: 16),
+          Text(
+            'Exported ${p.basename(exported)}',
+            key: const ValueKey('export-done'),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              OutlinedButton(
+                key: const ValueKey('export-show'),
+                onPressed: () =>
+                    unawaited((widget.revealFile ?? _defaultReveal)(exported)),
+                child: const Text('Show in folder'),
+              ),
+              FilledButton(
+                key: const ValueKey('wizard-finish'),
+                onPressed: () => unawaited(Navigator.of(context).maybePop()),
+                child: const Text('Back to songs'),
+              ),
+            ],
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _stepItem(WizardStep step, WizardFacts facts) {
+    final scheme = Theme.of(context).colorScheme;
+    final current = step == _step;
+    final open = canEnter(step, facts);
+    return InkWell(
+      key: ValueKey('step-${step.name}'),
+      onTap: open ? () => _goTo(step) : null,
+      borderRadius: BorderRadius.circular(20),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircleAvatar(
+              radius: 12,
+              backgroundColor: current
+                  ? scheme.primary
+                  : scheme.surfaceContainerHighest,
+              foregroundColor: current
+                  ? scheme.onPrimary
+                  : scheme.onSurfaceVariant,
+              child: Text(
+                '${step.index + 1}',
+                style: const TextStyle(fontSize: 12),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Text(
+              stepLabel(step),
+              style: TextStyle(
+                fontWeight: current ? FontWeight.bold : null,
+                color: open ? null : scheme.outline,
+              ),
+            ),
+            if (stepDone(step, facts)) ...[
+              const SizedBox(width: 4),
+              const Icon(Icons.check_circle, size: 16, color: Colors.green),
+            ],
+          ],
+        ),
       ),
     );
   }
 
-  Widget _exportCard(SongProject project) {
-    final blockers = exportBlockers(
-      project,
-      instrumentalReady: _hasInstrumental,
+  /// Vocal removal runs behind the other steps; this line says how it is going.
+  Widget? _vocalsStatus() {
+    if (_step == WizardStep.vocals) return null;
+    final text = switch (_stage) {
+      _Stage.separating => 'Removing vocals... you can keep working',
+      _Stage.separationFailed => 'Vocal removal failed',
+      _Stage.cancelled => 'Vocal removal was cancelled',
+      _ => null,
+    };
+    if (text == null) return null;
+    return Container(
+      key: const ValueKey('vocals-status'),
+      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      child: Row(
+        children: [
+          Expanded(child: Text(text)),
+          TextButton(
+            key: const ValueKey('vocals-status-show'),
+            onPressed: () => _goTo(WizardStep.vocals),
+            child: const Text('Show'),
+          ),
+        ],
+      ),
     );
+  }
+
+  Widget _stepContent(SongProject project) {
+    Widget scroll(List<Widget> children) =>
+        ListView(padding: const EdgeInsets.all(16), children: children);
+    switch (_step) {
+      case WizardStep.song:
+        return scroll([
+          Text('File: ${p.basename(project.inputPath)}'),
+          const SizedBox(height: 12),
+          if (_hasSource)
+            const Row(
+              children: [
+                Icon(Icons.check_circle, color: Colors.green),
+                SizedBox(width: 8),
+                Text('Audio ready'),
+              ],
+            )
+          else
+            _audio(),
+        ]);
+      case WizardStep.vocals:
+        return scroll([_audio()]);
+      case WizardStep.details:
+        return scroll([
+          _field('title', 'Title (required)', (p0, t) => p0.title = t),
+          _field('artist', 'Artist (required)', (p0, t) => p0.artist = t),
+          _field(
+            'number',
+            'Songbook number (optional)',
+            (p0, t) => p0.number = int.tryParse(t),
+            formatters: [
+              FilteringTextInputFormatter.digitsOnly,
+              LengthLimitingTextInputFormatter(9),
+            ],
+            keyboard: TextInputType.number,
+          ),
+          _field('composer', 'Composer (optional)', (p0, t) => p0.composer = t),
+          _field('lyricist', 'Lyricist (optional)', (p0, t) => p0.lyricist = t),
+        ]);
+      case WizardStep.lyrics:
+        return scroll([_lyricsStep(project)]);
+      case WizardStep.timing:
+        // No scrolling: the tap screen gets all the height there is, unless the
+        // window is too small for it.
+        return LayoutBuilder(
+          builder: (context, constraints) =>
+              constraints.maxHeight >= _minTapHeight
+              ? Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: _timing(project),
+                )
+              : SingleChildScrollView(
+                  padding: const EdgeInsets.all(16),
+                  child: SizedBox(
+                    height: _minTapHeight,
+                    child: _timing(project),
+                  ),
+                ),
+        );
+      case WizardStep.export:
+        return scroll([_exportStep(project, _facts)]);
+    }
+  }
+
+  Widget _wizard(SongProject project) {
+    final facts = _facts;
+    final status = _vocalsStatus();
+    final index = _step.index;
+    final next = index + 1 < WizardStep.values.length
+        ? WizardStep.values[index + 1]
+        : null;
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        for (final b in blockers) Text('• $b'),
-        if (blockers.isNotEmpty) const SizedBox(height: 8),
-        FilledButton(
-          onPressed: blockers.isEmpty && !_exporting ? _export : null,
-          child: const Text('Export .karmp3'),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+          child: Wrap(
+            spacing: 4,
+            runSpacing: 4,
+            children: [
+              for (final step in WizardStep.values) _stepItem(step, facts),
+            ],
+          ),
+        ),
+        const Divider(),
+        ?status,
+        Expanded(child: _stepContent(project)),
+        const Divider(height: 1),
+        Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            children: [
+              OutlinedButton(
+                key: const ValueKey('wizard-back'),
+                onPressed: index > 0
+                    ? () => _goTo(WizardStep.values[index - 1])
+                    : null,
+                child: const Text('Back'),
+              ),
+              const Spacer(),
+              if (next != null)
+                FilledButton(
+                  key: const ValueKey('wizard-next'),
+                  onPressed: canEnter(next, facts) ? () => _goTo(next) : null,
+                  child: const Text('Next'),
+                ),
+            ],
+          ),
         ),
       ],
     );
@@ -614,52 +907,7 @@ class _SongScreenState extends State<SongScreen> {
             )
           : project == null
           ? const Center(child: CircularProgressIndicator())
-          : ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                _card('Audio', _audio()),
-                _card('Lyrics', _lyricsCard(project)),
-                _card('Timing', _timing(project)),
-                _card(
-                  'Song details',
-                  Column(
-                    children: [
-                      _field(
-                        'title',
-                        'Title (required)',
-                        (p0, t) => p0.title = t,
-                      ),
-                      _field(
-                        'artist',
-                        'Artist (required)',
-                        (p0, t) => p0.artist = t,
-                      ),
-                      _field(
-                        'number',
-                        'Songbook number (optional)',
-                        (p0, t) => p0.number = int.tryParse(t),
-                        formatters: [
-                          FilteringTextInputFormatter.digitsOnly,
-                          LengthLimitingTextInputFormatter(9),
-                        ],
-                        keyboard: TextInputType.number,
-                      ),
-                      _field(
-                        'composer',
-                        'Composer (optional)',
-                        (p0, t) => p0.composer = t,
-                      ),
-                      _field(
-                        'lyricist',
-                        'Lyricist (optional)',
-                        (p0, t) => p0.lyricist = t,
-                      ),
-                    ],
-                  ),
-                ),
-                _card('Export', _exportCard(project)),
-              ],
-            ),
+          : _wizard(project),
     );
   }
 }

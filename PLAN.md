@@ -59,20 +59,31 @@ Example `.lrc` (line timing):
 
 ## User flow
 
-1. **New song**: pick an `.mp3` or `.mp4` (anything ffmpeg can read also works).
-2. **Import**: ffmpeg writes `source.mp3` (a plain copy when the input is already MP3) and
-   `source.wav` (44.1 kHz stereo, used for separation).
-3. **Remove vocals**: runs in the background. `audio-separator` (UVR models) turns
-   `source.wav` into an instrumental WAV, and ffmpeg encodes that as `instrumental.mp3`
-   (libmp3lame, 192 kbps, 44.1 kHz).
-4. **Lyrics**: paste the lyrics, one line per lyric line. Blank lines are dropped.
-5. **Tap timing**: `source.mp3` plays with the vocals in, which makes the lines easier to hear.
+**New song** on Home picks an `.mp3` or `.mp4` (anything ffmpeg can read also works). The song
+then opens as a wizard that shows one step at a time: a step header (tap a step to go there),
+Back, and Next. Next and the header only open a step once every step before it is done;
+Remove vocals does not hold up the later steps while it runs. A reopened song opens on its
+first unfinished step.
+
+1. **Song**: shows the chosen file. ffmpeg writes `source.mp3` (a plain copy when the input is
+   already MP3) and `source.wav` (44.1 kHz stereo, used for separation).
+2. **Remove vocals**: runs in the background, so the user may go on to the next steps; a status
+   line on them says how it is going. `audio-separator` (UVR models) turns `source.wav` into an
+   instrumental WAV, and ffmpeg encodes that as `instrumental.mp3` (libmp3lame, 192 kbps,
+   44.1 kHz). Only Export waits for it.
+3. **Details**: title, artist, and optionally songbook number, composer and lyricist. A blank
+   title or artist is filled from the file's tags (ffprobe) once the audio is read; typed
+   values are never replaced.
+4. **Lyrics**: searched on lrclib.net automatically when the step opens with an empty lyrics box
+   (once per title and artist). Only the title and artist are sent, and the step says so.
+   Pick a result or paste the lyrics, one line per lyric line. Blank lines are dropped.
+5. **Timing**: `source.mp3` plays with the vocals in, which makes the lines easier to hear.
    Space stamps the next line, Backspace undoes the last stamp, ←/→ seek 2 s, and playback
    speed can be 0.5×, 0.75× or 1×. A tap offset setting (−0.50 to +0.50 s, default 0)
    corrects for reaction time. A preview mode plays the instrumental with the current line
-   highlighted. Tapping can happen while step 3 is still running.
-6. **Details**: title, artist, and optionally songbook number, composer and lyricist.
-7. **Export**: a save dialog, then the `.karmp3` is written.
+   highlighted. A status line says how many lines are tapped.
+6. **Export**: shows the file name and any unfinished step with a button to go there; then a
+   save dialog, and the `.karmp3` is written. Afterwards: Show in folder, or Back to songs.
 
 Each song's work lives in a project folder that is saved as you go, so closing the app does
 not lose the tapping.
@@ -128,8 +139,10 @@ lib/
   pipeline.dart          ffmpeg/ffprobe/audio-separator args; importSong; SeparationJob
   tap_session.dart       line-timing logic (stamp, undo, select, offset, export)
   project.dart           SongProject + project.json persistence
-  export.dart            exportBlockers, exportKarMp3
-  screens/               home, song, tap, settings, tools_dialog
+  export.dart            exportBlockers, timingBlockers, exportKarMp3
+  wizard.dart            the song wizard's steps: done, can enter, opening step (pure Dart)
+  lyrics_lookup.dart     lrclib.net search (title and artist only)
+  screens/               home, song (the wizard), tap, lyrics_search_panel, settings, tools_dialog
 test/                    one *_test.dart per lib file; pure logic first, widget tests with injected seams
 ```
 

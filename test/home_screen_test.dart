@@ -279,7 +279,8 @@ void main() {
 
   testWidgets('home_row_opens_the_song_screen_by_default', (tester) async {
     final root = await makeRoot(tester);
-    await saveProject(tester, root, '20260101-000000', title: 'T', artist: 'A');
+    // No title: the song opens on Details, so no lyrics search goes online.
+    await saveProject(tester, root, '20260101-000000');
     // A finished song needs no tools, so the song screen starts nothing here.
     for (final f in ['source.mp3', 'source.wav', 'instrumental.mp3']) {
       File('${root.path}/20260101-000000/$f').writeAsStringSync('x');
@@ -290,15 +291,15 @@ void main() {
       MaterialApp(home: HomeScreen(projectsRoot: () async => root)),
     );
     await settle(tester);
-    await tester.tap(find.text('T - A'));
+    await tester.tap(find.text('song.mp3'));
     await settle(
       tester,
       until: () => find.byType(SongScreen).evaluate().isNotEmpty,
     );
+    // Loaded: a finished song without a title opens on the Details step.
     await settle(
       tester,
-      until: () =>
-          find.textContaining('Vocal removal finished').evaluate().isNotEmpty,
+      until: () => find.byKey(const ValueKey('title')).evaluate().isNotEmpty,
     );
     expect(find.byType(SongScreen), findsOneWidget);
   });

@@ -14,6 +14,7 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
+import 'export.dart' show oneLine;
 import 'fs_retry.dart';
 import 'jobs.dart';
 import 'tool_pins.dart';
@@ -34,6 +35,15 @@ List<String> durationArgs(String file) => [
       '-show_entries', 'format=duration',
       '-of', 'csv=p=0',
       file,
+    ];
+
+/// ffprobe: every container tag, as JSON. All of them rather than "title,artist",
+/// because tag names differ in case between containers (TITLE in Matroska).
+List<String> probeTagsArgs(String input) => [
+      '-v', 'error',
+      '-show_entries', 'format_tags',
+      '-of', 'json',
+      input,
     ];
 
 /// ffmpeg: the first audio stream as an MP3. With [copy] the MP3 data is copied as it
@@ -95,6 +105,31 @@ double parseDuration(String stdout) {
   return seconds;
 }
 
+/// The title and artist in ffprobe's tags JSON, on one line each; empty when missing
+/// or when [json] is not what ffprobe prints. Never throws.
+({String title, String artist}) parseTags(String json) {
+  Object? tags;
+  try {
+    final decoded = jsonDecode(json);
+    if (decoded is Map && decoded['format'] is Map) {
+      tags = (decoded['format'] as Map)['tags'];
+    }
+  } on FormatException {
+    // not JSON: no tags
+  }
+  String tag(String name) {
+    if (tags is! Map) return '';
+    for (final e in tags.entries) {
+      if ('${e.key}'.toLowerCase() == name && e.value is String) {
+        return oneLine(e.value as String);
+      }
+    }
+    return '';
+  }
+
+  return (title: tag('title'), artist: tag('artist'));
+}
+
 // ------------------------------------------------------------------- runners
 
 /// The input cannot be used (for example a video without an audio track).
@@ -154,6 +189,21 @@ Future<void> importSong(
 /// The length of an audio file in seconds, from ffprobe.
 Future<double> durationSeconds(ToolPaths t, String file) async =>
     parseDuration(await _capture(t.ffprobe, durationArgs(file)));
+
+/// The title and artist stored in [input]'s tags; empty strings when there are none
+/// or ffprobe fails (tags only prefill the details, so they never stop anything).
+Future<({String title, String artist})> readTags(
+  ToolPaths t,
+  String input,
+) async {
+  try {
+    return parseTags(await _capture(t.ffprobe, probeTagsArgs(input)));
+  } on ProcessFailure {
+    return (title: '', artist: '');
+  } on ProcessException {
+    return (title: '', artist: '');
+  }
+}
 
 /// Thrown by [SeparationJob.done] after [SeparationJob.cancel].
 class SeparationCancelled implements Exception {
