@@ -15,6 +15,32 @@ import 'tool_pins.dart';
 String oneLine(String s) =>
     s.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).join(' ');
 
+/// The file to write for the place [chosen] in the Save dialog. Windows can answer with a
+/// folder (an existing one, or a path ending in a separator) or with nothing but the
+/// extension; that must not become a file called ".karmp3", so those get [suggestedName]
+/// inside the folder. Both kinds of separator count, whatever the host OS. A missing
+/// ".karmp3" is added. [isDirectory] is for tests.
+String exportDestination(
+  String chosen,
+  String suggestedName, {
+  bool Function(String path)? isDirectory,
+}) {
+  const ext = '.karmp3';
+  final path = chosen.trim();
+  final cut = path.lastIndexOf(RegExp(r'[\\/]'));
+  final folder = cut < 0 ? '' : path.substring(0, cut + 1);
+  final name = path.substring(cut + 1);
+  final isFolder =
+      name.isEmpty || (isDirectory ?? (d) => Directory(d).existsSync())(path);
+  if (isFolder || name.toLowerCase() == ext) {
+    final dir = isFolder && name.isNotEmpty
+        ? path + (path.contains(r'\') ? r'\' : '/')
+        : folder;
+    return '$dir$suggestedName';
+  }
+  return name.toLowerCase().endsWith(ext) ? path : '$path$ext';
+}
+
 /// What stops the export, in the order the user should fix it; empty means ready.
 List<String> exportBlockers(
   SongProject p, {

@@ -36,9 +36,9 @@ first unfinished step.
 3. **Details**: title, artist, and optionally songbook number, composer and lyricist. A blank
    title or artist is filled from the file's tags (ffprobe) once the audio is read; typed
    values are never replaced. The step also searches musicbrainz.org by itself when it opens
-   (the typed title and artist, or what the file name suggests, as in "Artist - Title.mp3")
+   (the typed title and artist, or what the file name suggests, as in "Title - Artist.mp3")
    and lists matches with album, year and length (when nothing is found and both are filled in,
-   it searches once more with title and artist swapped, since the file name may be "Title - Artist"). Picking one sets the title and artist and
+   it searches once more with title and artist swapped, since the file name may be "Artist - Title"). Picking one sets the title and artist and
    fills composer and lyricist where they are blank (a work's "writer" counts as both). Only
    the title and artist (or the file name) are sent, and the step says so.
 4. **Lyrics**: searched on lrclib.net automatically when the step opens with an empty lyrics box

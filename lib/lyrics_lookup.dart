@@ -164,8 +164,8 @@ List<LyricsCandidate> rankLyrics(
 
 /// Searches LRCLIB for [title] and [artist]: up to ten matches, best first (then lyrics.ovh
 /// when LRCLIB has none). When both found nothing and title and artist are both filled in,
-/// the same is tried with the two swapped: the file name may be "Title - Artist" rather than
-/// "Artist - Title". Throws [LyricsLookupException] with a message fit to show the user.
+/// the same is tried with the two swapped: the file name may be "Artist - Title" rather than
+/// "Title - Artist". Throws [LyricsLookupException] with a message fit to show the user.
 Future<List<LyricsCandidate>> findLyrics(
   String title,
   String artist, {

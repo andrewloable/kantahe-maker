@@ -32,8 +32,10 @@ class SongInfoCandidate {
 
 final _bracketed = RegExp(r'\([^)]*\)|\[[^\]]*\]|\{[^}]*\}');
 
-/// The title and artist a file name suggests: "Artist - Title (Official Video).mp4".
-/// Parts in (), [] or {} are dropped; the text before the first " - " is the artist.
+/// The title and artist a file name suggests: "Title - Artist (Official Video).mp4".
+/// Parts in (), [] or {} are dropped; the text before the first " - " is the title.
+/// (Most files are named that way; the searches try the swapped order when this finds
+/// nothing.)
 ({String title, String artist}) queryFromFileName(String path) {
   final name = oneLine(
     p.basenameWithoutExtension(path).replaceAll(_bracketed, ' '),
@@ -41,8 +43,8 @@ final _bracketed = RegExp(r'\([^)]*\)|\[[^\]]*\]|\{[^}]*\}');
   final dash = name.indexOf(' - ');
   if (dash < 0) return (title: name, artist: '');
   return (
-    title: oneLine(name.substring(dash + 3)),
-    artist: oneLine(name.substring(0, dash)),
+    title: oneLine(name.substring(0, dash)),
+    artist: oneLine(name.substring(dash + 3)),
   );
 }
 
@@ -195,7 +197,7 @@ Future<String> _fetch(Uri uri, Duration timeout) async {
 
 /// Searches MusicBrainz for [title] by [artist]; at most 10 matches. When nothing is found
 /// and both are filled in, it searches once more with the two swapped: the file name may be
-/// "Title - Artist" rather than "Artist - Title".
+/// "Artist - Title" rather than "Title - Artist".
 Future<List<SongInfoCandidate>> findSongInfo(
   String title,
   String artist, {

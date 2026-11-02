@@ -415,10 +415,8 @@ class _SongScreenState extends State<SongScreen> {
       final chosen = await (widget.saveLocation ?? _defaultSaveLocation)(
         _fileName(project),
       );
-      if (chosen == null) return;
-      final dest = chosen.toLowerCase().endsWith('.karmp3')
-          ? chosen
-          : '$chosen.karmp3';
+      if (chosen == null || chosen.trim().isEmpty) return;
+      final dest = exportDestination(chosen, _fileName(project));
       if (!mounted) return;
       // The song length comes from ffprobe, which may not be known yet when a finished
       // song was opened.

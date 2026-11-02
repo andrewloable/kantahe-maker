@@ -44,7 +44,7 @@ Click **New song** and pick an audio or video file (an .mp3 or .mp4, for example
 
 <img src="docs/screenshots/02-remove-vocals.png" alt="Vocal removal running" width="600">
 
-**3. Details.** Title and artist come from the file; pick a match for composer and lyricist. If nothing is found, the search is tried again with title and artist swapped, in case the file is named "Title - Artist".
+**3. Details.** Title and artist come from the file (a name like "Title - Artist.mp3" is expected); pick a match for composer and lyricist. If nothing is found, the search is tried again with title and artist swapped, in case the file is named "Artist - Title". The Lyrics step also tries the swapped order when it finds nothing.
 
 <img src="docs/screenshots/03-details.png" alt="Song details with a list of matches" width="600">
 

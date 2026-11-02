@@ -45,12 +45,12 @@ Map<String, Object?> workRel(List<(String, String)> artists) => {
 void main() {
   group('queryFromFileName', () {
     test('query_from_file_name', () {
-      expect(queryFromFileName('/m/Artist - Title (Official Video).mp4'), (
+      expect(queryFromFileName('/m/Title - Artist (Official Video).mp4'), (
         title: 'Title',
         artist: 'Artist',
       ));
       expect(queryFromFileName('/m/Title.mp3'), (title: 'Title', artist: ''));
-      expect(queryFromFileName('/m/A - B - C.mp3'), (title: 'B - C', artist: 'A'));
+      expect(queryFromFileName('/m/A - B - C.mp3'), (title: 'A', artist: 'B - C'));
       expect(queryFromFileName('/m/[HD] Song Name.mp4'), (
         title: 'Song Name',
         artist: '',

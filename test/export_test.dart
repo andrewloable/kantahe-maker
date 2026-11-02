@@ -323,4 +323,33 @@ void main() {
       expect(oneLine('x'), 'x');
     });
   });
+
+  group('exportDestination', () {
+    const suggested = 'A - B.karmp3';
+    String dest(String chosen, {bool dir = false}) =>
+        exportDestination(chosen, suggested, isDirectory: (_) => dir);
+
+    test('a file name with the extension is kept', () {
+      expect(dest(r'C:\Music\Song.karmp3'), r'C:\Music\Song.karmp3');
+      expect(dest('/m/Song.KARMP3'), '/m/Song.KARMP3');
+    });
+    test('the extension is added when it is missing', () {
+      expect(dest(r'C:\Music\Song'), r'C:\Music\Song.karmp3');
+    });
+    test('a folder with a trailing separator gets the suggested name', () {
+      expect(dest(r'C:\Music\'), r'C:\Music\A - B.karmp3');
+      expect(dest('/m/'), '/m/A - B.karmp3');
+    });
+    test('an empty name before the extension gets the suggested name', () {
+      expect(dest(r'C:\Music\.karmp3'), r'C:\Music\A - B.karmp3');
+    });
+    test('an empty answer gives just the suggested name', () {
+      expect(dest(''), suggested);
+      expect(dest('  '), suggested);
+    });
+    test('an existing folder gets the suggested name inside it', () {
+      expect(dest(r'C:\Music', dir: true), r'C:\Music\A - B.karmp3');
+      expect(dest('/m', dir: true), '/m/A - B.karmp3');
+    });
+  });
 }
