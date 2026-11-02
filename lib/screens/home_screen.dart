@@ -8,6 +8,7 @@ import '../app_dirs.dart';
 import '../fs_retry.dart';
 import '../project.dart';
 import '../widgets/brand_header.dart';
+import '../windows_dialogs.dart';
 import 'settings_screen.dart';
 import 'song_screen.dart';
 
@@ -87,8 +88,16 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
-  Future<String?> _defaultPick() async =>
-      (await openFile(acceptedTypeGroups: const [_mediaTypes]))?.path;
+  Future<String?> _defaultPick() async {
+    // Windows: a dialog of its own process, see windows_dialogs.dart.
+    if (Platform.isWindows) {
+      return showWindowsDialog(
+        label: _mediaTypes.label!,
+        extensions: _mediaTypes.extensions!,
+      );
+    }
+    return (await openFile(acceptedTypeGroups: const [_mediaTypes]))?.path;
+  }
 
   void _defaultOpen(BuildContext context, Directory dir) {
     Navigator.of(context)

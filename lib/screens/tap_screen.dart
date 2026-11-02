@@ -11,7 +11,7 @@ import '../karmp3.dart' as karmp3;
 import '../tap_session.dart';
 
 /// What a key press does on the tap screen.
-enum TapAction { stamp, undo, playPause, seekBack, seekForward }
+enum TapAction { stamp, undo, playPause, seekBack, seekForward, shift }
 
 /// The action for [key], or null. Key repeats are ignored: a held key must not stamp
 /// line after line.
@@ -22,6 +22,7 @@ TapAction? tapActionFor(LogicalKeyboardKey key, {required bool isRepeat}) {
   if (key == LogicalKeyboardKey.keyP) return TapAction.playPause;
   if (key == LogicalKeyboardKey.arrowLeft) return TapAction.seekBack;
   if (key == LogicalKeyboardKey.arrowRight) return TapAction.seekForward;
+  if (key == LogicalKeyboardKey.keyS) return TapAction.shift;
   return null;
 }
 
@@ -105,7 +106,7 @@ class TapScreen extends StatefulWidget {
   final List<String> lines;
   final String sourcePath;
 
-  /// Null until vocal removal has finished; the preview switch is off until then.
+  /// Null until vocal splitting has finished; the preview switch is off until then.
   final String? instrumentalPath;
   final List<double?> initialTimes;
 
@@ -263,12 +264,19 @@ class _TapScreenState extends State<TapScreen> {
         if (!_preview) _mutate(_wordMode ? _undoWord : _session.undo);
       case TapAction.playPause:
         _togglePlay();
+      case TapAction.shift:
+        _shiftToNow();
       case TapAction.seekBack:
         _seekBy(-_seekStep);
       case TapAction.seekForward:
         _seekBy(_seekStep);
     }
     return KeyEventResult.handled;
+  }
+
+  /// Makes the first line start now and moves every other tapped line along with it.
+  void _shiftToNow() {
+    if (!_preview) _mutate(() => _session.shiftTo(_now));
   }
 
   void _togglePlay() =>
@@ -398,6 +406,14 @@ class _TapScreenState extends State<TapScreen> {
                             unawaited(_player.seek(_secondsToDuration(v))),
                       ),
                     ),
+                    IconButton.outlined(
+                      key: const ValueKey('shift'),
+                      tooltip: 'First line starts here, the rest move with it (S)',
+                      onPressed: _preview || times.isEmpty || times[0] == null
+                          ? null
+                          : _shiftToNow,
+                      icon: const Icon(Icons.vertical_align_top),
+                    ),
                   ],
                 ),
               ),
@@ -452,7 +468,7 @@ class _TapScreenState extends State<TapScreen> {
                 title: const Text('Preview with the instrumental'),
                 subtitle: Text(
                   widget.instrumentalPath == null
-                      ? 'Available when vocal removal has finished'
+                      ? 'Available when vocal splitting has finished'
                       : 'Space, Backspace and line clicks are off while previewing',
                 ),
                 value: _preview,

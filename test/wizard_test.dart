@@ -34,7 +34,7 @@ void main() {
   test('labels_in_order', () {
     expect(WizardStep.values.map(stepLabel).toList(), [
       'Song',
-      'Remove vocals',
+      'Split vocals',
       'Details',
       'Lyrics',
       'Timing',

@@ -32,7 +32,7 @@ const pythonVersion = '3.12';
 /// 0.47.1 was released on 2026-10-19; 0.47.2 and 0.48.0 are newer but only a day old.
 const audioSeparatorVersion = '0.47.1';
 
-/// The vocal-removal model, fetched by audio-separator itself on first use
+/// The vocal-splitting model, fetched by audio-separator itself on first use
 /// (64 MB, from github.com/TRvlvr/model_repo). One run writes both stems, named
 /// "INPUT_(Instrumental)_UVR-MDX-NET-Inst_HQ_3.wav" and "INPUT_(Vocals)_...wav"
 /// (checked 2026-11-02).

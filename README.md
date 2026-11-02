@@ -16,7 +16,7 @@ The app's domain is kantahe.party.
 ## Why Kantahe Maker
 
 - **Free and open source** (MIT license).
-- **Vocals removed on your computer** by AI models. Your music is never uploaded.
+- **Vocals split on your computer** by AI models. Your music is never uploaded.
 - **Lyrics and song details found for you**, or type and paste your own.
 - **Tap along to time the lyrics**, at half speed if you like, even word by word.
 - **Vocals on or off:** tick one box to add the singer's track as a separate, smaller MP3, so a player can switch it on and off.
@@ -30,7 +30,7 @@ Get the latest version from the [releases page](https://github.com/andrewloable/
 - **Windows**: `kantahe-maker-<version>-windows.zip`. SmartScreen warns about unsigned apps: choose **More info**, then **Run anyway**.
 - **Linux**: `kantahe-maker-<version>-linux.tar.gz`. It needs libmpv (`libmpv2` or `libmpv1`).
 
-The first time, the app asks before it downloads the tools it needs (ffmpeg, Python with the vocal-removal software, and the model): about 1.4 GB, once.
+The first time, the app asks before it downloads the tools it needs (ffmpeg, Python with the vocal-splitting software, and the model): about 1.4 GB, once.
 
 ## How it works
 
@@ -40,9 +40,9 @@ Click **New song** and pick an audio or video file (an .mp3 or .mp4, for example
 
 <img src="docs/screenshots/01-home.png" alt="The list of songs, with the New song button" width="600">
 
-**2. Remove vocals.** The singer is taken out, in the background: carry on meanwhile.
+**2. Split vocals.** The singer is split from the music, in the background: carry on meanwhile.
 
-<img src="docs/screenshots/02-remove-vocals.png" alt="Vocal removal running" width="600">
+<img src="docs/screenshots/02-remove-vocals.png" alt="Vocal splitting running" width="600">
 
 **3. Details.** Title and artist come from the file (a name like "Title - Artist.mp3" is expected); pick a match for composer and lyricist. If nothing is found, the search is tried again with title and artist swapped, in case the file is named "Artist - Title". The Lyrics step also tries the swapped order when it finds nothing.
 
@@ -74,7 +74,7 @@ Nothing else leaves your computer. There is no account.
 
 **Which files can I use?** Audio or video files: .mp3, .mp4, .m4a, .mkv, .webm, .wav and .flac.
 
-**How long does vocal removal take?** It depends on your computer and the song. It runs in the background, so you can fill in the details and lyrics meanwhile.
+**How long does vocal splitting take?** It depends on your computer and the song. It runs in the background, so you can fill in the details and lyrics meanwhile.
 
 **Where are my songs saved?** In the app's folder for your user (on macOS: `~/Library/Application Support/party.kantahe.maker/projects`), saved as you go. The `.karmp3` goes where you choose. Delete a song from the list on the home screen.
 
@@ -110,7 +110,7 @@ tags: you do that by hand.
 - macOS builds are unsigned: the first time, right-click the app and choose Open.
 - Windows shows a SmartScreen warning for an unsigned app.
 - Linux needs libmpv at runtime (`libmpv2` or `libmpv1`, depending on the distro).
-- The tools the app needs (ffmpeg, uv, the vocal-removal model) are not bundled: the app
+- The tools the app needs (ffmpeg, uv, the vocal-splitting model) are not bundled: the app
   downloads them after asking for consent.
 
 ## The .karmp3 format
@@ -165,7 +165,7 @@ and off.
   so the vocals and the lyrics fall out of step after every seek. Constant-bitrate files seek
   exactly. Version 1.2.0 did write variable-bitrate files (a Xing tag instead of Info, the
   average from its counts); a reader may meet them, and a song is made again by running its
-  vocal removal again.
+  vocal splitting again.
 - **Nothing else** goes in the archive (no video, no original audio). A reader should ignore
   entries it does not know.
 - **Times** in the `.lrc` count from the start of `NAME.mp3` (and of `NAME.vocals.mp3`, which

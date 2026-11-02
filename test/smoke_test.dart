@@ -61,7 +61,7 @@ void main() {
   });
 
   testWidgets('exit_with_a_job_that_fails_when_cancelled_raises_no_error', (tester) async {
-    // The real vocal-removal job ends with an error (SeparationCancelled) when cancelled.
+    // The real vocal-splitting job ends with an error (SeparationCancelled) when cancelled.
     final job = _Job(failsOnCancel: true);
     jobs.track(job);
     await tester.pumpWidget(const KantaheApp(home: SizedBox()));

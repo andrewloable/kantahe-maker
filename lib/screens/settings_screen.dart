@@ -16,7 +16,7 @@ List<String> openFolderCommand(HostOs os, String path) => switch (os) {
     };
 
 /// The name shown for a key of [toolStatus].
-String toolLabel(String key) => key == 'model' ? 'Vocal-removal model' : key;
+String toolLabel(String key) => key == 'model' ? 'Vocal-splitting model' : key;
 
 /// The downloaded tools: where each one is, and buttons to download or repair them,
 /// open their folder and delete them. Everything that touches the machine can be
@@ -93,7 +93,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       builder: (context) => AlertDialog(
         title: const Text('Delete the downloaded tools?'),
         content: const Text('This removes ffmpeg, uv, Python, audio-separator and the '
-            'vocal-removal model that this app downloaded. Programs installed elsewhere on '
+            'vocal-splitting model that this app downloaded. Programs installed elsewhere on '
             'this computer are not touched. You can download everything again at any time.'),
         actions: [
           TextButton(

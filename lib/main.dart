@@ -24,7 +24,7 @@ class KantaheApp extends StatefulWidget {
 }
 
 class _KantaheAppState extends State<KantaheApp> {
-  // When the app is asked to quit, programs it started (vocal removal) are ended first,
+  // When the app is asked to quit, programs it started (vocal splitting) are ended first,
   // so none is left running; a stuck one is given up on after a few seconds.
   late final AppLifecycleListener _lifecycle = AppLifecycleListener(
     onExitRequested: () async {

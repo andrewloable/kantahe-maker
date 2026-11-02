@@ -20,12 +20,12 @@ examples and its list of `.nfo` rows in step with the code. Change the format th
 **New song** on Home picks an `.mp3` or `.mp4` (the file picker also offers .m4a, .mkv, .webm, .wav and .flac). The song
 then opens as a wizard that shows one step at a time: a step header (tap a step to go there),
 Back, and Next. Next and the header only open a step once every step before it is done;
-Remove vocals does not hold up the later steps while it runs. A reopened song opens on its
+Split vocals does not hold up the later steps while it runs. A reopened song opens on its
 first unfinished step.
 
 1. **Song**: shows the chosen file. ffmpeg writes `source.mp3` (a plain copy when the input is
    already MP3) and `source.wav` (44.1 kHz stereo, used for separation).
-2. **Remove vocals**: runs in the background, so the user may go on to the next steps; a status
+2. **Split vocals**: runs in the background, so the user may go on to the next steps; a status
    line on them says how it is going. `audio-separator` (UVR models) turns `source.wav` into an
    instrumental WAV and a vocals WAV in one run. ffmpeg encodes the vocals as `vocals.mp3`
    (libmp3lame, 48 kbps constant, 44.1 kHz, mono) and then the instrumental as
@@ -57,7 +57,7 @@ first unfinished step.
 6. **Export**: shows the file name and any unfinished step with a button to go there. The
    "Include the vocals" box (off by default, saved per song) adds `NAME.vocals.mp3`, so a
    player can turn the vocals on and off. A song whose vocals were removed by version 1.0.x
-   has no `vocals.mp3`; with the box ticked, the step says so and offers "Run vocal removal
+   has no `vocals.mp3`; with the box ticked, the step says so and offers "Run vocal splitting
    again" first. Then a save dialog, and the `.karmp3` is written. Afterwards: Show in
    folder, or Back to songs.
 
@@ -80,7 +80,7 @@ app runs with `dart:io` `Process`. Nothing outside the app is bundled with it.
 | Checksums | `crypto` (sha256) | verifies downloaded tools |
 | State | plain `StatefulWidget` / `ChangeNotifier` | the app is small enough that it needs no state-management library |
 | Audio conversion | **ffmpeg + ffprobe** (external) | extraction, encoding and reading the duration |
-| Vocal removal | **`audio-separator`** (python-audio-separator; packages the UVR models as a CLI), started through **`uv`** (external) | `uv` is one binary; it fetches its own Python and the package, so the user installs nothing by hand |
+| Vocal splitting | **`audio-separator`** (python-audio-separator; packages the UVR models as a CLI), started through **`uv`** (external) | `uv` is one binary; it fetches its own Python and the package, so the user installs nothing by hand |
 | Separation model | `UVR-MDX-NET-Inst_HQ_3.onnx` (the `audio-separator` default for karaoke instrumentals) | fast on CPU; `audio-separator` downloads it on first use |
 
 ### Dependency manager (download only after the user agrees)

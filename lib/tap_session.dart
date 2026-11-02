@@ -108,6 +108,27 @@ class TapSession {
     }
   }
 
+  /// Moves the first line to [t] and every other tapped line (and word) by the same
+  /// amount, so the gaps between them stay. For lyrics whose times are right except for
+  /// a constant lead-in error. Does nothing when the first line is not tapped.
+  void shiftTo(double t) {
+    final first = _times.isEmpty ? null : _times[0];
+    if (first == null) return;
+    final delta = t - first;
+    double move(double v) => v + delta < 0 ? 0.0 : v + delta;
+    for (var i = 0; i < _times.length; i++) {
+      final v = _times[i];
+      if (v != null) _times[i] = move(v);
+      final w = _words[i];
+      if (w != null) {
+        for (var j = 0; j < w.length; j++) {
+          final x = w[j];
+          if (x != null) w[j] = move(x);
+        }
+      }
+    }
+  }
+
   /// Removes the last tap.
   void undo() {
     final i = _times.lastIndexWhere((t) => t != null);

@@ -1,4 +1,4 @@
-// Background jobs the app must end before it quits (vocal removal starts programs that
+// Background jobs the app must end before it quits (vocal splitting starts programs that
 // would otherwise keep running). Pure Dart: no Flutter imports.
 
 /// What the app needs from a running background job.

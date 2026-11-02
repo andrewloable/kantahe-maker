@@ -67,7 +67,7 @@ const fakeTools = ToolPaths(
   modelDir: '/demo/models',
 );
 
-/// Vocal removal that never finishes (the screenshot shows it running).
+/// Vocal splitting that never finishes (the screenshot shows it running).
 class DemoJob implements CancellableJob {
   final _done = Completer<void>();
   @override
@@ -192,7 +192,7 @@ class Shots {
     written.add(file.path);
   }
 
-  /// Leaves the screen, so the job of vocal removal and the timers end.
+  /// Leaves the screen, so the job of vocal splitting and the timers end.
   Future<void> leave() async {
     await drawn(tester.pumpWidget(const SizedBox()));
     await drawn(tester.pump(const Duration(milliseconds: 200)));
@@ -246,7 +246,7 @@ void main() {
     await s.shoot('01-home.png');
     await s.leave();
 
-    // 02 Remove vocals, while it runs.
+    // 02 Split vocals, while it runs.
     final running = await s.song(instrumental: false);
     await s.show(
       s.songScreen(
@@ -258,7 +258,7 @@ void main() {
       ),
     );
     await s.wait(1000);
-    expect(find.text('Removing vocals...'), findsOneWidget, reason: '02-remove-vocals');
+    expect(find.text('Splitting vocals...'), findsOneWidget, reason: '02-remove-vocals');
     expect(find.text('Cancel'), findsOneWidget, reason: '02-remove-vocals');
     await s.shoot('02-remove-vocals.png');
     await s.leave();
@@ -405,7 +405,7 @@ void main() {
       final size = pngSize(file.readAsBytesSync());
       expect((size.width, size.height), (2400, 1520), reason: name);
     }
-    expect(jobs.length, 0, reason: 'no vocal removal left running');
+    expect(jobs.length, 0, reason: 'no vocal splitting left running');
     beforeTest!.dispose();
   });
 }

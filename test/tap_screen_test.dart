@@ -171,6 +171,35 @@ void main() {
     expect(labelOfRow(tester, 1), '--');
   });
 
+  testWidgets('s_and_the_button_move_every_line_with_the_first', (tester) async {
+    final h = await pumpScreen(tester, times: [10, 14, 20]);
+    h.player.moveTo(const Duration(seconds: 12));
+    await press(tester, LogicalKeyboardKey.keyS);
+    expect(h.changes.last.$1, [12, 16, 22]);
+    h.player.moveTo(const Duration(seconds: 9));
+    await tester.tap(find.byKey(const ValueKey('shift')));
+    await tester.pump();
+    expect(h.changes.last.$1, [9, 13, 19]);
+  });
+
+  testWidgets('shift_is_off_without_a_first_tap_and_while_previewing', (
+    tester,
+  ) async {
+    final h = await pumpScreen(tester);
+    await press(tester, LogicalKeyboardKey.keyS);
+    expect(h.changes, isEmpty);
+    final button = tester.widget<IconButton>(
+      find.byKey(const ValueKey('shift')),
+    );
+    expect(button.onPressed, isNull);
+    final h2 = await pumpScreen(tester, times: [1, 2, 3]);
+    await tester.tap(find.byKey(const ValueKey('preview')));
+    await tester.pump();
+    h2.player.moveTo(const Duration(seconds: 5));
+    await press(tester, LogicalKeyboardKey.keyS);
+    expect(h2.changes, isEmpty);
+  });
+
   testWidgets('row_click_selects_and_seeks_to_the_previous_line', (
     tester,
   ) async {

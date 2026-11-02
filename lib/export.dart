@@ -49,7 +49,7 @@ List<String> exportBlockers(
 }) {
   final lines = p.lyricLines();
   return [
-    if (!instrumentalReady) 'Vocal removal is not finished',
+    if (!instrumentalReady) 'Vocal splitting is not finished',
     if (p.includeVocals && !vocalsReady) 'The vocals track is missing',
     if (lines.isEmpty) 'Add lyrics' else ...timingBlockers(p),
     if (oneLine(p.title).isEmpty) 'Title is required',

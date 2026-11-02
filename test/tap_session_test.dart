@@ -71,6 +71,43 @@ void main() {
     });
   });
 
+  group('shiftTo', () {
+    test('shift_keeps_the_gaps', () {
+      final s = three(times: [10, 14, 20])..shiftTo(12);
+      expect(s.times, [12, 16, 22]);
+      s.shiftTo(9);
+      expect(s.times, [9, 13, 19]);
+    });
+
+    test('shift_skips_untapped_lines', () {
+      final s = three(times: [10, null, 20])..shiftTo(11);
+      expect(s.times, [11, null, 21]);
+    });
+
+    test('shift_moves_word_times_too', () {
+      final s = TapSession(
+        ['a b', 'c'],
+        times: [10, 14],
+        wordTimes: [
+          [10, 12],
+          null,
+        ],
+      )..shiftTo(11);
+      expect(s.times, [11, 15]);
+      expect(s.wordTimes[0], [11, 13]);
+    });
+
+    test('shift_never_goes_below_zero', () {
+      final s = three(times: [1, 2, 0.5])..shiftTo(0);
+      expect(s.times, [0, 1, 0]);
+    });
+
+    test('shift_needs_a_tapped_first_line', () {
+      final s = three(times: [null, 2, 3])..shiftTo(5);
+      expect(s.times, [null, 2, 3]);
+    });
+  });
+
   group('undo', () {
     test('undo', () {
       final s = three(times: [1, 2, null])..undo();

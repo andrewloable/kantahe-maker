@@ -35,7 +35,7 @@ Future<void> _open(WidgetTester tester) async {
   await tester.pumpAndSettle();
 }
 
-const _installText = 'Installing Python, audio-separator and the vocal-removal model. '
+const _installText = 'Installing Python, audio-separator and the vocal-splitting model. '
     'This can take several minutes.';
 
 void main() {
@@ -47,7 +47,7 @@ void main() {
         'ffmpeg and ffprobe',
         'uv (Python manager)',
         'Python and audio-separator',
-        'Vocal-removal model (UVR)',
+        'Vocal-splitting model (UVR)',
       ]);
       expect(items[0].source, 'ffmpeg.martin-riedl.de');
       expect(items[1].source, 'github.com');

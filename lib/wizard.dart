@@ -8,7 +8,7 @@ enum WizardStep { song, vocals, details, lyrics, timing, export }
 
 String stepLabel(WizardStep step) => switch (step) {
   WizardStep.song => 'Song',
-  WizardStep.vocals => 'Remove vocals',
+  WizardStep.vocals => 'Split vocals',
   WizardStep.details => 'Details',
   WizardStep.lyrics => 'Lyrics',
   WizardStep.timing => 'Timing',
@@ -29,10 +29,10 @@ class WizardFacts {
   /// The song's audio has been extracted (source.mp3 exists).
   final bool hasSource;
 
-  /// Vocal removal has finished (instrumental.mp3 exists).
+  /// Vocal splitting has finished (instrumental.mp3 exists).
   final bool hasInstrumental;
 
-  /// Vocal removal is running.
+  /// Vocal splitting is running.
   final bool separating;
 }
 
@@ -51,7 +51,7 @@ bool stepDone(WizardStep step, WizardFacts f) {
   };
 }
 
-/// A step the user can go on past without finishing it: vocal removal runs behind.
+/// A step the user can go on past without finishing it: vocal splitting runs behind.
 bool _passable(WizardStep step, WizardFacts f) =>
     stepDone(step, f) || (step == WizardStep.vocals && f.separating);
 

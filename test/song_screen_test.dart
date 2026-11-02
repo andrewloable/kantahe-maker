@@ -282,7 +282,7 @@ void main() {
       expect(s.imports, ['/x/in.mp4']);
       await goTo(tester, WizardStep.vocals);
       s.sep.finish();
-      await settle(tester, until: () => shown('Vocal removal finished'));
+      await settle(tester, until: () => shown('Vocal splitting finished'));
     });
 
     testWidgets('import_then_separation_flow', (tester) async {
@@ -295,12 +295,12 @@ void main() {
       expect(
         find.byType(TapScreen),
         findsOneWidget,
-        reason: 'tapping is possible as soon as the song is read, during vocal removal',
+        reason: 'tapping is possible as soon as the song is read, during vocal splitting',
       );
       expect(s.ensureCalls, 1);
       expect(s.imports, ['/x/in.mp4']);
       await goTo(tester, WizardStep.vocals);
-      expect(shown('Removing vocals'), isTrue);
+      expect(shown('Splitting vocals'), isTrue);
       expect(find.text('Cancel'), findsOneWidget);
       s.sep.emit('size=  120KiB time=00:00:12');
       await tester.pump();
@@ -310,7 +310,7 @@ void main() {
         reason: 'the last output line',
       );
       s.sep.finish();
-      await settle(tester, until: () => shown('Vocal removal finished'));
+      await settle(tester, until: () => shown('Vocal splitting finished'));
       expect(find.text('Cancel'), findsNothing);
       expect(File('${s.dir.path}/instrumental.mp3').existsSync(), isTrue);
     });
@@ -318,7 +318,7 @@ void main() {
     testWidgets('nothing_runs_when_the_files_already_exist', (tester) async {
       final s = await pumpSong(tester, source: true, instrumental: true);
       await goTo(tester, WizardStep.vocals);
-      expect(shown('Vocal removal finished'), isTrue);
+      expect(shown('Vocal splitting finished'), isTrue);
       expect(
         s.ensureCalls,
         0,
@@ -335,7 +335,7 @@ void main() {
       await settle(tester, until: () => s.seps.isNotEmpty);
       expect(s.imports, isEmpty);
       s.sep.finish();
-      await settle(tester, until: () => shown('Vocal removal finished'));
+      await settle(tester, until: () => shown('Vocal splitting finished'));
     });
 
     testWidgets('import_failure_shows_the_message_and_retry_works', (
@@ -355,7 +355,7 @@ void main() {
       expect(s.imports, hasLength(2));
       await goTo(tester, WizardStep.vocals);
       s.sep.finish();
-      await settle(tester, until: () => shown('Vocal removal finished'));
+      await settle(tester, until: () => shown('Vocal splitting finished'));
     });
 
     testWidgets('separation_failure_shows_the_error_and_retry_starts_again', (
@@ -365,13 +365,13 @@ void main() {
       await settle(tester, until: () => s.seps.isNotEmpty);
       await goTo(tester, WizardStep.vocals);
       s.sep.fail(ProcessFailure(2, const ['model missing']));
-      await settle(tester, until: () => shown('Vocal removal failed'));
+      await settle(tester, until: () => shown('Vocal splitting failed'));
       expect(shown('model missing'), isTrue);
       await tester.tap(find.text('Retry'));
       await settle(tester, until: () => s.seps.length == 2);
-      expect(shown('Removing vocals'), isTrue);
+      expect(shown('Splitting vocals'), isTrue);
       s.sep.finish();
-      await settle(tester, until: () => shown('Vocal removal finished'));
+      await settle(tester, until: () => shown('Vocal splitting finished'));
     });
 
     testWidgets('cancel_button_stops_the_job_and_start_again_runs_a_new_one', (
@@ -381,7 +381,7 @@ void main() {
       await settle(tester, until: () => s.seps.isNotEmpty);
       await goTo(tester, WizardStep.vocals);
       await tester.tap(find.text('Cancel'));
-      await settle(tester, until: () => shown('Vocal removal was cancelled'));
+      await settle(tester, until: () => shown('Vocal splitting was cancelled'));
       expect(s.sep.cancelled, isTrue);
       await tester.tap(find.text('Start again'));
       await settle(tester, until: () => s.seps.length == 2);
@@ -391,7 +391,7 @@ void main() {
         reason: 'the song is not read a second time',
       );
       s.sep.finish();
-      await settle(tester, until: () => shown('Vocal removal finished'));
+      await settle(tester, until: () => shown('Vocal splitting finished'));
     });
 
     testWidgets(
@@ -691,12 +691,12 @@ void main() {
 
   group('export', () {
     testWidgets('blockers_are_listed_and_the_button_is_off', (tester) async {
-      // Export opens once every step before it is done or, for vocal removal,
+      // Export opens once every step before it is done or, for vocal splitting,
       // running: what can still be missing there is the instrumental.
       final s = await pumpSong(tester, configure: tappedSong, source: true);
       await settle(tester, until: () => s.seps.isNotEmpty);
       await goTo(tester, WizardStep.export);
-      expect(shown('Remove vocals: still running'), isTrue);
+      expect(shown('Split vocals: still running'), isTrue);
       final button = tester.widget<FilledButton>(
         find.widgetWithText(FilledButton, 'Export .karmp3'),
       );
@@ -1271,7 +1271,7 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('wizard-next')));
       await tester.pump();
       expect(find.byKey(const ValueKey('title')), findsOneWidget);
-      expect(strip('Removing vocals'), findsOneWidget);
+      expect(strip('Splitting vocals'), findsOneWidget);
       s.sep.finish();
       await settle(
         tester,
@@ -1288,7 +1288,7 @@ void main() {
       s.sep.fail(StateError('boom'));
       await settle(
         tester,
-        until: () => strip('Vocal removal failed').evaluate().isNotEmpty,
+        until: () => strip('Vocal splitting failed').evaluate().isNotEmpty,
       );
       await tester.tap(find.byKey(const ValueKey('vocals-status-show')));
       await tester.pump();
@@ -1300,7 +1300,7 @@ void main() {
       expect(find.byKey(const ValueKey('title')), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('wizard-back')));
       await tester.pump();
-      expect(shown('Vocal removal finished'), isTrue);
+      expect(shown('Vocal splitting finished'), isTrue);
       expect(find.byKey(const ValueKey('title')), findsNothing);
     });
 
@@ -1381,7 +1381,7 @@ void main() {
       s.sep.cancel();
       await settle(
         tester,
-        until: () => strip('Vocal removal was cancelled').evaluate().isNotEmpty,
+        until: () => strip('Vocal splitting was cancelled').evaluate().isNotEmpty,
       );
       await tester.tap(find.byKey(const ValueKey('vocals-status-show')));
       await tester.pump();
@@ -1471,7 +1471,7 @@ void main() {
     });
 
     // Export opens only when every earlier step is done or running, so a step can
-    // become unfinished there only by vocal removal failing after it was opened.
+    // become unfinished there only by vocal splitting failing after it was opened.
     testWidgets('export_lists_unfinished_steps_with_a_way_there', (
       tester,
     ) async {
@@ -1479,7 +1479,7 @@ void main() {
       await settle(tester, until: () => s.seps.isNotEmpty);
       await goTo(tester, WizardStep.export);
       s.sep.fail(StateError('boom'));
-      await settle(tester, until: () => shown('Remove vocals: not finished'));
+      await settle(tester, until: () => shown('Split vocals: not finished'));
       await tester.tap(find.byKey(const ValueKey('fix-vocals')));
       await tester.pump();
       expect(find.text('Retry'), findsOneWidget);
@@ -1489,7 +1489,7 @@ void main() {
       final s = await pumpSong(tester, configure: tappedSong, source: true);
       await settle(tester, until: () => s.seps.isNotEmpty);
       await goTo(tester, WizardStep.export);
-      expect(shown('Remove vocals: still running'), isTrue);
+      expect(shown('Split vocals: still running'), isTrue);
       expect(find.byKey(const ValueKey('fix-vocals')), findsOneWidget);
       expect(
         tester
@@ -1501,6 +1501,47 @@ void main() {
       );
       s.sep.finish();
       await settle(tester, until: () => jobs.length == 0);
+    });
+
+    Future<void> exportAndWaitForToast(WidgetTester tester) async {
+      final s = await pumpSong(
+        tester,
+        configure: tappedSong,
+        source: true,
+        instrumental: true,
+      );
+      s.savePath = '${s.root.path}/out.karmp3';
+      await tester.tap(find.widgetWithText(FilledButton, 'Export .karmp3'));
+      await settle(
+        tester,
+        until: () => find.byType(SnackBar).evaluate().isNotEmpty,
+      );
+    }
+
+    testWidgets('export_toast_closes_by_itself_after_3_seconds', (
+      tester,
+    ) async {
+      await exportAndWaitForToast(tester);
+      // The 3 s start once the toast has slid in; the exit takes a moment too.
+      await tester.pump(const Duration(seconds: 2));
+      expect(find.byType(SnackBar), findsOneWidget, reason: 'not before 3 s');
+      for (var i = 0; i < 5; i++) {
+        await tester.pump(const Duration(seconds: 1));
+      }
+      expect(find.byType(SnackBar), findsNothing);
+    });
+
+    testWidgets('export_toast_has_a_close_button', (tester) async {
+      await exportAndWaitForToast(tester);
+      await tester.pump(const Duration(seconds: 1)); // let it slide in
+      await tester.tap(find.descendant(
+        of: find.byType(SnackBar),
+        matching: find.byIcon(Icons.close),
+      ));
+      // One pump slides it out, the next removes it.
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.pump(const Duration(milliseconds: 500));
+      expect(find.byType(SnackBar), findsNothing);
     });
 
     testWidgets('after_export_show_and_finish', (tester) async {
@@ -1632,7 +1673,7 @@ void main() {
       );
       expect(find.byKey(const ValueKey('vocals-missing')), findsNothing);
       expect(find.byKey(const ValueKey('vocals-rerun')), findsNothing);
-      expect(shown('Remove vocals: not finished'), isTrue);
+      expect(shown('Split vocals: not finished'), isTrue);
     });
 
     testWidgets('failed_rerun_keeps_the_old_instrumental', (tester) async {
@@ -1651,7 +1692,7 @@ void main() {
         until: () =>
             find.byKey(const ValueKey('vocals-status')).evaluate().isNotEmpty,
       );
-      expect(shown('Vocal removal failed'), isTrue);
+      expect(shown('Vocal splitting failed'), isTrue);
       await tester.tap(find.byKey(const ValueKey('export-vocals')));
       await tester.pump();
       expect(ticked(tester), isFalse);

@@ -5,7 +5,7 @@
 //
 // Files of one song (in its work folder):
 //   source.mp3        the song with vocals, for playback while tapping the lyrics
-//   source.wav        44.1 kHz stereo PCM, the input of vocal removal
+//   source.wav        44.1 kHz stereo PCM, the input of vocal splitting
 //   instrumental.mp3  96 kbps, 44.1 kHz stereo, no metadata: goes into the .karmp3
 //   vocals.mp3        48 kbps, 44.1 kHz mono, no metadata: goes into the .karmp3 when the
 //                     user includes the vocals (written before instrumental.mp3)
@@ -329,10 +329,10 @@ class SeparationCancelled implements Exception {
   const SeparationCancelled();
 
   @override
-  String toString() => 'Vocal removal was cancelled';
+  String toString() => 'Vocal splitting was cancelled';
 }
 
-/// Vocal removal running in the background. [done] completes when work/vocals.mp3 and
+/// Vocal splitting running in the background. [done] completes when work/vocals.mp3 and
 /// work/instrumental.mp3 exist (the vocals are moved into place first, so a song that has
 /// instrumental.mp3 also has vocals.mp3), or fails with [SeparationCancelled] (after [cancel]), [ProcessFailure] or
 /// StateError. Whatever the outcome, work/sep and the partial files are removed.
@@ -440,7 +440,7 @@ class SeparationJob implements CancellableJob {
   }
 }
 
-/// Starts vocal removal for work/source.wav. See [SeparationJob]. After [cancel] a
+/// Starts vocal splitting for work/source.wav. See [SeparationJob]. After [cancel] a
 /// program that does not end by itself gets [killGrace] before it is killed for good.
 SeparationJob separate(
   ToolPaths t,

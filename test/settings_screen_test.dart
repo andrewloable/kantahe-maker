@@ -46,7 +46,7 @@ void main() {
     await pumpSettings(tester);
     expect(find.text('/opt/homebrew/bin/ffmpeg'), findsOneWidget);
     expect(find.text('Missing'), findsNWidgets(4));
-    for (final label in ['ffmpeg', 'ffprobe', 'uv', 'audio-separator', 'Vocal-removal model']) {
+    for (final label in ['ffmpeg', 'ffprobe', 'uv', 'audio-separator', 'Vocal-splitting model']) {
       expect(find.text(label), findsOneWidget, reason: label);
     }
   });
@@ -117,7 +117,7 @@ void main() {
 
   group('label', () {
     test('tool_labels', () {
-      expect(toolLabel('model'), 'Vocal-removal model');
+      expect(toolLabel('model'), 'Vocal-splitting model');
       expect(toolLabel('ffmpeg'), 'ffmpeg');
       expect(toolLabel('something-new'), 'something-new');
     });

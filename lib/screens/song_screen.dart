@@ -15,6 +15,7 @@ import '../pipeline.dart';
 import '../project.dart';
 import '../song_info.dart';
 import '../tools.dart';
+import '../windows_dialogs.dart';
 import '../wizard.dart';
 import 'tap_screen.dart';
 import 'lyrics_search_panel.dart';
@@ -44,7 +45,7 @@ enum _Stage {
 }
 
 /// One song from its input file to an exported .karmp3, as a wizard with one step on
-/// screen at a time (see [WizardStep]): reads the song, removes the vocals in the
+/// screen at a time (see [WizardStep]): reads the song, splits the vocals in the
 /// background, takes the details, the lyrics and the taps, and exports. Everything that
 /// touches the machine can be replaced in tests.
 class SongScreen extends StatefulWidget {
@@ -219,7 +220,7 @@ class _SongScreenState extends State<SongScreen> {
     setState(() => _lastLine = line.trim());
   }
 
-  /// Reads the song and removes the vocals, doing only what is not done yet.
+  /// Reads the song and splits the vocals, doing only what is not done yet.
   Future<void> _runAudio() async {
     if (_hasSource && _hasInstrumental) {
       _setStage(_Stage.ready);
@@ -285,7 +286,7 @@ class _SongScreenState extends State<SongScreen> {
     }
   }
 
-  /// After a vocal removal that did not finish: an instrumental made earlier (when the
+  /// After a vocal splitting that did not finish: an instrumental made earlier (when the
   /// removal was run again) still counts.
   void _restoreFlagsFromDisk() {
     _hasInstrumental = File(_file('instrumental.mp3')).existsSync();
@@ -293,7 +294,7 @@ class _SongScreenState extends State<SongScreen> {
   }
 
   /// For a song made by an older version, which has no vocals.mp3.
-  void _runVocalRemovalAgain() {
+  void _runVocalSplittingAgain() {
     setState(() => _hasInstrumental = false);
     unawaited(_runAudio());
   }
@@ -388,6 +389,14 @@ class _SongScreenState extends State<SongScreen> {
   // ------------------------------------------------------------------- export
 
   Future<String?> _defaultSaveLocation(String suggestedName) async {
+    // Windows: a dialog of its own process, see windows_dialogs.dart.
+    if (Platform.isWindows) {
+      return showWindowsDialog(
+        label: 'Karaoke',
+        extensions: const ['karmp3'],
+        suggestedName: suggestedName,
+      );
+    }
     final location = await getSaveLocation(
       suggestedName: suggestedName,
       acceptedTypeGroups: const [
@@ -439,6 +448,10 @@ class _SongScreenState extends State<SongScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Exported ${p.basename(dest)}'),
+          // A snackbar with an action stays until dismissed unless persist is off.
+          persist: false,
+          duration: const Duration(seconds: 3),
+          showCloseIcon: true,
           action: SnackBarAction(
             label: 'Show',
             onPressed: () =>
@@ -501,7 +514,7 @@ class _SongScreenState extends State<SongScreen> {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Removing vocals...'),
+            const Text('Splitting vocals...'),
             const SizedBox(height: 8),
             const LinearProgressIndicator(),
             const SizedBox(height: 8),
@@ -523,15 +536,15 @@ class _SongScreenState extends State<SongScreen> {
           children: [
             Icon(Icons.check_circle, color: Colors.green),
             SizedBox(width: 8),
-            Text('Vocal removal finished'),
+            Text('Vocal splitting finished'),
           ],
         );
       case _Stage.importFailed:
         return _problem('Could not read the song: $_error', 'Retry');
       case _Stage.separationFailed:
-        return _problem('Vocal removal failed: $_error', 'Retry');
+        return _problem('Vocal splitting failed: $_error', 'Retry');
       case _Stage.cancelled:
-        return _problem('Vocal removal was cancelled', 'Start again');
+        return _problem('Vocal splitting was cancelled', 'Start again');
     }
   }
 
@@ -792,7 +805,7 @@ class _SongScreenState extends State<SongScreen> {
                 Expanded(
                   child: Text(
                     step == WizardStep.vocals && facts.separating
-                        ? 'Remove vocals: still running'
+                        ? 'Split vocals: still running'
                         : '${stepLabel(step)}: not finished',
                   ),
                 ),
@@ -818,7 +831,7 @@ class _SongScreenState extends State<SongScreen> {
         ),
         if (needsRerun) ...[
           const Text(
-            "This song's vocals were not kept: its vocal removal ran in an older version. Run it again to include them.",
+            "This song's vocals were not kept: its vocal splitting ran in an older version. Run it again to include them.",
             key: ValueKey('vocals-missing'),
           ),
           const SizedBox(height: 8),
@@ -826,8 +839,8 @@ class _SongScreenState extends State<SongScreen> {
             alignment: Alignment.centerLeft,
             child: OutlinedButton(
               key: const ValueKey('vocals-rerun'),
-              onPressed: _runVocalRemovalAgain,
-              child: const Text('Run vocal removal again'),
+              onPressed: _runVocalSplittingAgain,
+              child: const Text('Run vocal splitting again'),
             ),
           ),
         ],
@@ -909,13 +922,13 @@ class _SongScreenState extends State<SongScreen> {
     );
   }
 
-  /// Vocal removal runs behind the other steps; this line says how it is going.
+  /// Vocal splitting runs behind the other steps; this line says how it is going.
   Widget? _vocalsStatus() {
     if (_step == WizardStep.vocals) return null;
     final text = switch (_stage) {
-      _Stage.separating => 'Removing vocals... you can keep working',
-      _Stage.separationFailed => 'Vocal removal failed',
-      _Stage.cancelled => 'Vocal removal was cancelled',
+      _Stage.separating => 'Splitting vocals... you can keep working',
+      _Stage.separationFailed => 'Vocal splitting failed',
+      _Stage.cancelled => 'Vocal splitting was cancelled',
       _ => null,
     };
     if (text == null) return null;

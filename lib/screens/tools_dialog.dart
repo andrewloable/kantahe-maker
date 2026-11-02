@@ -38,7 +38,7 @@ List<ToolItem> toolItems(HostOs os, HostArch arch) {
         'pypi.org',
         approxSizeMb['python+audio-separator']!,
         '${toolLicenses['Python']} / ${toolLicenses['audio-separator']}'),
-    ToolItem('Vocal-removal model (UVR)', 'github.com (UVR models)',
+    ToolItem('Vocal-splitting model (UVR)', 'github.com (UVR models)',
         approxSizeMb['model']!, toolLicenses['UVR model']!),
   ];
 }
@@ -181,7 +181,7 @@ class _ToolsDialogState extends State<_ToolsDialog> {
                 ],
               _Phase.working => [
                   Text(_installing
-                      ? 'Installing Python, audio-separator and the vocal-removal model. '
+                      ? 'Installing Python, audio-separator and the vocal-splitting model. '
                           'This can take several minutes.'
                       : _file.isEmpty
                           ? 'Starting...'

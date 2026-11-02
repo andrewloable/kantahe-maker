@@ -10,6 +10,7 @@ void main() {
     expect(a(LogicalKeyboardKey.keyP), TapAction.playPause);
     expect(a(LogicalKeyboardKey.arrowLeft), TapAction.seekBack);
     expect(a(LogicalKeyboardKey.arrowRight), TapAction.seekForward);
+    expect(a(LogicalKeyboardKey.keyS), TapAction.shift);
     expect(a(LogicalKeyboardKey.keyA), isNull);
     expect(a(LogicalKeyboardKey.enter), isNull);
   });
@@ -21,6 +22,7 @@ void main() {
       LogicalKeyboardKey.keyP,
       LogicalKeyboardKey.arrowLeft,
       LogicalKeyboardKey.arrowRight,
+      LogicalKeyboardKey.keyS,
     ]) {
       expect(tapActionFor(k, isRepeat: true), isNull, reason: '$k');
     }

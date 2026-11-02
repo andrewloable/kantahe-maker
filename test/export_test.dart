@@ -27,7 +27,7 @@ void main() {
   group('exportBlockers', () {
     test('blockers_all', () {
       expect(exportBlockers(SongProject(id: 'x', inputPath: 'a'), instrumentalReady: false), [
-        'Vocal removal is not finished',
+        'Vocal splitting is not finished',
         'Add lyrics',
         'Title is required',
         'Artist is required',
@@ -256,7 +256,7 @@ void main() {
       File('${work.path}/instrumental.mp3').deleteSync();
       final dest = '${tmp.path}/out.karmp3';
       await expectLater(exportKarMp3(ready(), work, dest, durationSeconds: 10),
-          throwsA(isA<StateError>().having((e) => e.message, 'message', contains('Vocal removal'))));
+          throwsA(isA<StateError>().having((e) => e.message, 'message', contains('Vocal splitting'))));
       expect(File(dest).existsSync(), isFalse);
     });
 
