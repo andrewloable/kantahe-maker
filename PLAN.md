@@ -28,21 +28,23 @@ first unfinished step.
 2. **Remove vocals**: runs in the background, so the user may go on to the next steps; a status
    line on them says how it is going. `audio-separator` (UVR models) turns `source.wav` into an
    instrumental WAV and a vocals WAV in one run. ffmpeg encodes the vocals as `vocals.mp3`
-   (libmp3lame, variable bitrate averaging 48 kbps via `-abr 1`, 44.1 kHz, mono) and then the
-   instrumental as `instrumental.mp3` (libmp3lame, variable bitrate averaging 96 kbps, 44.1 kHz
-   stereo). Both get a Xing header (`-write_xing 1`: frame count and seek table). Each stem is first measured and then brought to
+   (libmp3lame, 48 kbps constant, 44.1 kHz, mono) and then the instrumental as
+   `instrumental.mp3` (libmp3lame, 96 kbps constant, 44.1 kHz stereo). Both get an Info header
+   (ffmpeg's default: frame count and seek table). Each stem is first measured and then brought to
    about -16 LUFS (two passes of ffmpeg `loudnorm`; a silent stem is left as it is), so the
    vocals end up as loud as the instrumental. Only Export waits for it.
 3. **Details**: title, artist, and optionally songbook number, composer and lyricist. A blank
    title or artist is filled from the file's tags (ffprobe) once the audio is read; typed
    values are never replaced. The step also searches musicbrainz.org by itself when it opens
    (the typed title and artist, or what the file name suggests, as in "Artist - Title.mp3")
-   and lists matches with album, year and length. Picking one sets the title and artist and
+   and lists matches with album, year and length (when nothing is found and both are filled in,
+   it searches once more with title and artist swapped, since the file name may be "Title - Artist"). Picking one sets the title and artist and
    fills composer and lyricist where they are blank (a work's "writer" counts as both). Only
    the title and artist (or the file name) are sent, and the step says so.
 4. **Lyrics**: searched on lrclib.net automatically when the step opens with an empty lyrics box
    (once per title and artist). When lrclib.net finds nothing, lyrics.ovh is asked (plain
-   lyrics only). Only the title and artist are sent, and the step says so. Pick a result or
+   lyrics only); when both found nothing, the same two are tried once more with title and artist
+   swapped. Only the title and artist are sent, and the step says so. Pick a result or
    paste the lyrics, one line per lyric line. Blank lines are dropped. A result marked
    "timed" has line times: picking it pre-times the lines.
 5. **Timing**: `source.mp3` plays with the vocals in, which makes the lines easier to hear.
@@ -136,12 +138,14 @@ test/                    one *_test.dart per lib file; pure logic first, widget 
 - **The macOS App Sandbox is turned off.** The app runs binaries it downloaded, and the
   sandbox would block them. This is acceptable because the app is not headed for the Mac
   App Store.
-- **MP3 bitrates are fixed**: the instrumental is variable bitrate averaging 96 kbps and the
-  vocals 48 kbps (LAME ABR, with a Xing header for exact length and seeking). They were constant
-  128 and 64 kbps in 1.1.x, and the instrumental 192 kbps up to 1.0.x; the `.nfo` Audio and
-  Vocals audio rows say what a file really has (the average, from the Xing tag, for variable
-  files). ABR was chosen over quality-based VBR because it honours the chosen bitrates and
-  gives a predictable size. A setting can be added if someone asks for one.
+- **MP3 bitrates are fixed and constant**: the instrumental is 96 kbps and the vocals 48 kbps (128 and
+  64 kbps in 1.1.x, the instrumental 192 kbps up to 1.0.x); the `.nfo` Audio and Vocals audio rows
+  say what a file really has. Version 1.2.0 tried variable bitrate at about 96 and 48 kbps (LAME
+  ABR) and 1.2.1 went back to constant bitrate: Chromium seeks in a variable-bitrate MP3 0.3 to
+  1.4 s away from the asked time (the seek goes through the approximate Xing seek table) while
+  `currentTime` still says the asked time, so the Kantahe web player's guide vocals came in late
+  after a toggle. Constant bitrate seeks exactly (measured in Chromium at 96 and 48 kbps). A
+  setting can be added if someone asks for one.
 
 ## How the work is run
 

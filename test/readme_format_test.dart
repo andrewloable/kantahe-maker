@@ -41,11 +41,11 @@ Nfo exampleNfo() => Nfo(
   composer: 'John Newton',
   lyricist: 'John Newton',
   seconds: 227,
-  audio: describeMp3(const Mp3Info(kbps: 96, hertz: 44100, channels: 2, variable: true)),
+  audio: describeMp3(const Mp3Info(kbps: 96, hertz: 44100, channels: 2)),
   separator: separatorModel.replaceAll(RegExp(r'\.onnx$'), ''),
   instrumental: '$name.mp3',
   vocals: '$name.vocals.mp3',
-  vocalsAudio: 'MP3, 44.1 kHz, 48 kbps average (VBR), mono',
+  vocalsAudio: 'MP3, 44.1 kHz, 48 kbps, mono',
   lyricLines: 4,
 );
 

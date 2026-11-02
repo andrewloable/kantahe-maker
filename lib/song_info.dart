@@ -193,15 +193,25 @@ Future<String> _fetch(Uri uri, Duration timeout) async {
   throw SongInfoException('$songInfoHost answered HTTP $status');
 }
 
-/// Searches MusicBrainz for [title] by [artist]; at most 10 matches.
+/// Searches MusicBrainz for [title] by [artist]; at most 10 matches. When nothing is found
+/// and both are filled in, it searches once more with the two swapped: the file name may be
+/// "Title - Artist" rather than "Artist - Title".
 Future<List<SongInfoCandidate>> findSongInfo(
   String title,
   String artist, {
   Uri? base,
   Duration timeout = const Duration(seconds: 15),
 }) async {
-  final body = await _fetch(songInfoSearchUri(title, artist, base: base), timeout);
-  return parseSongInfoSearch(body).take(10).toList();
+  Future<List<SongInfoCandidate>> search(String t, String a) async =>
+      parseSongInfoSearch(await _fetch(songInfoSearchUri(t, a, base: base), timeout)).take(10).toList();
+  final found = await search(title, artist);
+  return found.isNotEmpty || !_canSwap(title, artist) ? found : search(artist, title);
+}
+
+/// Whether swapping title and artist gives another search: both are filled in and differ.
+bool _canSwap(String title, String artist) {
+  final t = oneLine(title).toLowerCase(), a = oneLine(artist).toLowerCase();
+  return t.isNotEmpty && a.isNotEmpty && t != a;
 }
 
 /// The composer and lyricist of one recording found by [findSongInfo].

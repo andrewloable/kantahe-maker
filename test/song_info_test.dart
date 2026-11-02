@@ -212,12 +212,15 @@ void main() {
     var status = 200;
     var body = '{}';
     var hang = false;
+    // When set, answers by the request (the query) instead of [body].
+    String Function(HttpRequest)? answer;
 
     setUp(() async {
       seen.clear();
       status = 200;
       body = '{}';
       hang = false;
+      answer = null;
       server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
       base = Uri.parse('http://127.0.0.1:${server.port}/ws/2/recording');
       server.listen((req) {
@@ -226,7 +229,7 @@ void main() {
         req.response
           ..statusCode = status
           ..headers.contentType = ContentType.json
-          ..write(body)
+          ..write(answer?.call(req) ?? body)
           ..close();
       });
     });
@@ -246,6 +249,52 @@ void main() {
         req.uri.queryParameters['query'],
         'recording:"Yesterday" AND artist:"The Beatles"',
       );
+    });
+
+    String queryOf(HttpRequest r) => r.uri.queryParameters['query']!;
+
+    test('find_swaps_when_nothing_is_found', () async {
+      // "Title - Artist.mp3" read as "Artist - Title": the first search has them the wrong way.
+      answer = (r) => queryOf(r) == 'recording:"Yesterday" AND artist:"The Beatles"'
+          ? fixture('musicbrainz_search.json')
+          : '{"recordings":[]}';
+      final out = await findSongInfo('The Beatles', 'Yesterday', base: base);
+      expect(out, hasLength(3));
+      expect(seen.map(queryOf), [
+        'recording:"The Beatles" AND artist:"Yesterday"',
+        'recording:"Yesterday" AND artist:"The Beatles"',
+      ]);
+    });
+
+    test('find_does_not_swap_when_found', () async {
+      body = fixture('musicbrainz_search.json');
+      await findSongInfo('Yesterday', 'The Beatles', base: base);
+      expect(seen, hasLength(1));
+    });
+
+    test('find_does_not_swap_without_artist', () async {
+      body = '{"recordings":[]}';
+      expect(await findSongInfo('Yesterday', '  ', base: base), isEmpty);
+      expect(seen, hasLength(1));
+    });
+
+    test('find_does_not_swap_when_both_are_the_same_ignoring_case', () async {
+      body = '{"recordings":[]}';
+      expect(await findSongInfo('Queen', 'queen', base: base), isEmpty);
+      expect(seen, hasLength(1));
+    });
+
+    test('find_swapped_nothing_either', () async {
+      body = '{"recordings":[]}';
+      expect(await findSongInfo('A', 'B', base: base), isEmpty);
+      expect(seen, hasLength(2));
+    });
+
+    test('find_http_error_does_not_swap', () async {
+      status = 500;
+      body = 'oops';
+      await expectLater(findSongInfo('A', 'B', base: base), throwsA(isA<SongInfoException>()));
+      expect(seen, hasLength(1));
     });
 
     test('find_limits_to_ten', () async {

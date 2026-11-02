@@ -120,8 +120,29 @@ void main() {
     });
 
     test('info_tag_is_constant_bitrate', () {
-      final i = readMp3Info(tagged(h96, tag: 'Info', frames: 1000, bytes: 360000))!;
+      // 1000 frames of 313 bytes (96 kbps at 44.1 kHz): the counts agree with the header.
+      final i = readMp3Info(tagged(h96, tag: 'Info', frames: 1000, bytes: 313000))!;
       expect((i.kbps, i.variable), (96, false));
+    });
+
+    test('info_frame_may_have_a_larger_bitrate_than_the_stream', () {
+      // A 48 kbps mono frame (156 bytes) is too small for the tag, so ffmpeg writes the Info
+      // frame itself at 56 kbps; the counts say what the stream is.
+      final i = readMp3Info(
+        tagged([0xFF, 0xFB, 0x40, 0xC0], tag: 'Info', mono: true, frames: 1000, bytes: 156000),
+      )!;
+      expect((i.kbps, i.channels, i.variable), (48, 1, false));
+    });
+
+    test('info_average_is_rounded_to_a_standard_bitrate', () {
+      // 1000 frames, 360000 bytes: 110 kbps, which is no MP3 bitrate; 112 is the closest.
+      final i = readMp3Info(tagged(h96, tag: 'Info', frames: 1000, bytes: 360000))!;
+      expect((i.kbps, i.variable), (112, false));
+    });
+
+    test('info_without_counts_keeps_the_header_bitrate', () {
+      expect(readMp3Info(tagged(h96, tag: 'Info'))!.kbps, 96);
+      expect(readMp3Info(tagged(h96, tag: 'Info', frames: 1000))!.kbps, 96);
     });
 
     test('xing_without_counts_keeps_the_header_bitrate', () {
@@ -235,10 +256,10 @@ void main() {
     }
   }, skip: ffmpeg == null ? 'ffmpeg not found' : false);
 
-  // What the app really makes: variable bitrate, with a Xing header that has the frame count
-  // (exact length) and a seek table.
+  // What the app really makes: constant bitrate (browsers seek wrongly in variable bitrate),
+  // with an Info tag that holds the frame count (exact length) and a seek table.
   test('mp3_info_reads_the_files_the_app_encodes', () {
-    final tmp = Directory.systemTemp.createTempSync('mp3_abr');
+    final tmp = Directory.systemTemp.createTempSync('mp3_cbr');
     addTearDown(() => tmp.deleteSync(recursive: true));
     final ffprobe = findExecutable(
       'ffprobe',
@@ -253,24 +274,22 @@ void main() {
       '-ac', '2', '-ar', '44100', wav,
     ]);
     if (made.exitCode != 0) throw Exception('ffmpeg failed: ${made.stderr}');
-    for (final (name, args, channels, low, high) in [
-      ('instrumental', encodeInstrumentalArgs(wav, '${tmp.path}/i.mp3'), 2, 60, 130),
-      ('vocals', encodeVocalsArgs(wav, '${tmp.path}/v.mp3'), 1, 30, 70),
+    for (final (name, args, channels, kbps) in [
+      ('instrumental', encodeInstrumentalArgs(wav, '${tmp.path}/i.mp3'), 2, 96),
+      ('vocals', encodeVocalsArgs(wav, '${tmp.path}/v.mp3'), 1, 48),
     ]) {
       final out = args.last;
       final r = Process.runSync(ffmpeg, ['-v', 'error', ...args]);
       if (r.exitCode != 0) throw Exception('ffmpeg failed: ${r.stderr}');
       final bytes = File(out).readAsBytesSync();
       final i = readMp3Info(bytes)!;
-      expect(i.variable, isTrue, reason: name);
-      expect(i.channels, channels, reason: name);
-      expect(i.kbps, inInclusiveRange(low, high), reason: name);
+      expect((i.kbps, i.channels, i.variable), (kbps, channels, false), reason: name);
       // The tag says: frame count, byte count and TOC.
       var at = -1;
       for (var k = 0; k < 400 && at < 0; k++) {
-        if (String.fromCharCodes(bytes.sublist(k, k + 4)) == 'Xing') at = k;
+        if (String.fromCharCodes(bytes.sublist(k, k + 4)) == 'Info') at = k;
       }
-      expect(at, greaterThan(0), reason: '$name has a Xing tag');
+      expect(at, greaterThan(0), reason: '$name has an Info tag');
       final flags = bytes[at + 4] << 24 | bytes[at + 5] << 16 | bytes[at + 6] << 8 | bytes[at + 7];
       expect(flags & 7, 7, reason: '$name: frames, bytes and TOC');
       final frames = bytes[at + 8] << 24 | bytes[at + 9] << 16 | bytes[at + 10] << 8 | bytes[at + 11];
@@ -282,5 +301,21 @@ void main() {
         expect(int.parse((c.stdout as String).trim()), frames, reason: '$name frame count');
       }
     }
+  }, skip: ffmpeg == null ? 'ffmpeg not found' : false);
+
+  // Version 1.2.0 wrote variable bitrate; such files exist and are described by their average.
+  test('mp3_info_reads_a_variable_bitrate_file_of_1_2_0', () {
+    final tmp = Directory.systemTemp.createTempSync('mp3_abr');
+    addTearDown(() => tmp.deleteSync(recursive: true));
+    final out = '${tmp.path}/abr.mp3';
+    final r = Process.runSync(ffmpeg!, [
+      '-v', 'error', '-y', '-f', 'lavfi', '-i', 'anoisesrc=d=6:c=pink:r=44100:a=0.3',
+      '-c:a', 'libmp3lame', '-abr', '1', '-b:a', '96k', '-write_xing', '1',
+      '-ar', '44100', '-ac', '2', out,
+    ]);
+    if (r.exitCode != 0) throw Exception('ffmpeg failed: ${r.stderr}');
+    final i = readMp3Info(File(out).readAsBytesSync())!;
+    expect(i.variable, isTrue);
+    expect(i.kbps, inInclusiveRange(60, 130));
   }, skip: ffmpeg == null ? 'ffmpeg not found' : false);
 }

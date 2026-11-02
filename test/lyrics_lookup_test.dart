@@ -198,8 +198,11 @@ void main() {
     var ovhStatus = 200;
     var ovhBody = '{}';
     var ovhHang = false;
+    // When set, answer by the request instead of [body] / [ovhBody]: (status, body).
+    (int, String) Function(HttpRequest)? route;
 
     setUp(() async {
+      route = null;
       seen.clear();
       status = 200;
       body = '[]';
@@ -215,19 +218,21 @@ void main() {
         if (req.uri.path.startsWith('/v1/')) {
           ovhSeen.add(req);
           if (ovhHang) return;
+          final r = route?.call(req);
           req.response
-            ..statusCode = ovhStatus
+            ..statusCode = r?.$1 ?? ovhStatus
             ..headers.contentType = ContentType.json
-            ..write(ovhBody)
+            ..write(r?.$2 ?? ovhBody)
             ..close();
           return;
         }
         seen.add(req);
         if (hang) return;
+        final r = route?.call(req);
         req.response
-          ..statusCode = status
+          ..statusCode = r?.$1 ?? status
           ..headers.contentType = ContentType.json
-          ..write(body)
+          ..write(r?.$2 ?? body)
           ..close();
       });
     });
@@ -246,6 +251,73 @@ void main() {
       });
       expect(req.headers.value('user-agent'), startsWith('KantaheMaker/'));
       expect(out.map((c) => c.title), ['Bohemian Rhapsody', 'Other']);
+    });
+
+    String trackOf(HttpRequest r) => r.uri.queryParameters['track_name']!;
+
+    test('find_swaps_when_nothing_is_found', () async {
+      // "Title - Artist.mp3" read as "Artist - Title": the first search has them the wrong way.
+      route = (r) => r.uri.path.startsWith('/v1/')
+          ? (404, '{"error":"No lyrics found"}')
+          : (200, trackOf(r) == 'Bohemian Rhapsody' ? jsonEncode([entry()]) : '[]');
+      final out = await findLyrics('Queen', 'Bohemian Rhapsody', base: base, ovhBase: ovhBase);
+      expect(out.single.title, 'Bohemian Rhapsody');
+      expect(seen.map(trackOf), ['Queen', 'Bohemian Rhapsody']);
+      expect(ovhSeen, hasLength(1), reason: 'only the first order was asked of lyrics.ovh');
+    });
+
+    test('find_swaps_and_falls_back_to_ovh', () async {
+      body = '[]';
+      route = (r) => r.uri.path.startsWith('/v1/')
+          ? (r.uri.path == '/v1/Queen/Bohemian%20Rhapsody' ? (200, '{"lyrics":"x\\ny"}') : (404, '{}'))
+          : (200, '[]');
+      final out = await findLyrics('Queen', 'Bohemian Rhapsody', base: base, ovhBase: ovhBase);
+      expect(out, hasLength(1));
+      expect((out.single.source, out.single.title, out.single.artist), (
+        'lyrics.ovh',
+        'Bohemian Rhapsody',
+        'Queen',
+      ));
+      expect(seen, hasLength(2));
+      expect(ovhSeen, hasLength(2));
+    });
+
+    test('find_does_not_swap_when_found', () async {
+      body = jsonEncode([entry()]);
+      await findLyrics('Bohemian Rhapsody', 'Queen', base: base, ovhBase: ovhBase);
+      expect(seen, hasLength(1));
+      expect(ovhSeen, isEmpty);
+    });
+
+    test('find_does_not_swap_without_artist', () async {
+      body = '[]';
+      expect(await findLyrics('Song', '  ', base: base, ovhBase: ovhBase), isEmpty);
+      expect(seen, hasLength(1));
+    });
+
+    test('find_does_not_swap_when_both_are_the_same_ignoring_case', () async {
+      body = '[]';
+      expect(await findLyrics('Queen', 'queen', base: base, ovhBase: ovhBase), isEmpty);
+      expect(seen, hasLength(1));
+      expect(ovhSeen, hasLength(1));
+    });
+
+    test('find_nothing_anywhere', () async {
+      body = '[]';
+      ovhStatus = 404;
+      expect(await findLyrics('A', 'B', base: base, ovhBase: ovhBase), isEmpty);
+      expect(seen, hasLength(2));
+      expect(ovhSeen, hasLength(2));
+    });
+
+    test('find_lrclib_error_does_not_swap', () async {
+      status = 500;
+      body = 'oops';
+      await expectLater(
+        findLyrics('A', 'B', base: base, ovhBase: ovhBase),
+        throwsA(isA<LyricsLookupException>()),
+      );
+      expect(seen, hasLength(1));
     });
 
     test('find_limits_to_ten', () async {

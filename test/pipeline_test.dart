@@ -100,7 +100,8 @@ void main() {
     });
     test('args_encode_instrumental', () {
       final a = encodeInstrumentalArgs('i.wav', 'o.mp3');
-      expect(hasSeq(a, ['-abr', '1', '-b:a', '96k', '-write_xing', '1']), isTrue);
+      expect(hasSeq(a, ['-b:a', '96k']), isTrue);
+      expect(a, isNot(contains('-abr')), reason: 'browsers seek wrongly in variable bitrate');
       expect(hasSeq(a, ['-map_metadata', '-1']), isTrue);
       expect(hasSeq(a, ['-c:a', 'libmp3lame']), isTrue);
       expect(hasSeq(a, ['-ar', '44100']), isTrue);
@@ -186,15 +187,13 @@ void main() {
         'measured_LRA=2.2:measured_thresh=-17.56:offset=-0.01:linear=true';
     expect(encodeInstrumentalArgs('i.wav', 'o.mp3', loudness: l), [
       '-y', '-i', 'i.wav', '-af', filter, '-map_metadata', '-1',
-      '-c:a', 'libmp3lame', '-abr', '1', '-b:a', '96k', '-write_xing', '1',
-      '-ar', '44100', '-ac', '2',
+      '-c:a', 'libmp3lame', '-b:a', '96k', '-ar', '44100', '-ac', '2',
       '-f', 'mp3', 'o.mp3',
     ]);
     expect(encodeVocalsArgs('v.wav', 'o.mp3', loudness: l), [
       '-y', '-i', 'v.wav', '-af', 'aformat=channel_layouts=mono,$filter',
       '-map_metadata', '-1',
-      '-c:a', 'libmp3lame', '-abr', '1', '-b:a', '48k', '-write_xing', '1',
-      '-ar', '44100', '-ac', '1',
+      '-c:a', 'libmp3lame', '-b:a', '48k', '-ar', '44100', '-ac', '1',
       '-f', 'mp3', 'o.mp3',
     ]);
   });
@@ -202,8 +201,7 @@ void main() {
   test('args_encode_vocals', () {
     expect(encodeVocalsArgs('v.wav', 'o.mp3'), [
       '-y', '-i', 'v.wav', '-map_metadata', '-1',
-      '-c:a', 'libmp3lame', '-abr', '1', '-b:a', '48k', '-write_xing', '1',
-      '-ar', '44100', '-ac', '1',
+      '-c:a', 'libmp3lame', '-b:a', '48k', '-ar', '44100', '-ac', '1',
       '-f', 'mp3', 'o.mp3',
     ]);
   });
@@ -700,10 +698,11 @@ cp "__V__" "$out/x_(Vocals)_m.wav"
         probe('${work.path}/vocals.mp3', 'stream=codec_name,sample_rate,channels'),
         'mp3,44100,1',
       );
-      // Variable bitrate with a Xing header that has a seek table (TOC).
-      for (final f in ['instrumental', 'vocals']) {
+      // Constant bitrate (browsers seek wrongly in variable bitrate), with an Info tag that
+      // has a seek table (TOC).
+      for (final (f, kbps) in [('instrumental', 96), ('vocals', 48)]) {
         final info = readMp3Info(File('${work.path}/$f.mp3').readAsBytesSync())!;
-        expect(info.variable, isTrue, reason: f);
+        expect((info.variable, info.kbps), (false, kbps), reason: f);
         expect(xingFlags('${work.path}/$f.mp3')! & 4, 4, reason: '$f has a TOC');
       }
       final lengthOfInstrumental = await durationSeconds(

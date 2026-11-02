@@ -162,8 +162,10 @@ List<LyricsCandidate> rankLyrics(
   ];
 }
 
-/// Searches LRCLIB for [title] and [artist]: up to ten matches, best first. Throws
-/// [LyricsLookupException] with a message fit to show the user.
+/// Searches LRCLIB for [title] and [artist]: up to ten matches, best first (then lyrics.ovh
+/// when LRCLIB has none). When both found nothing and title and artist are both filled in,
+/// the same is tried with the two swapped: the file name may be "Title - Artist" rather than
+/// "Artist - Title". Throws [LyricsLookupException] with a message fit to show the user.
 Future<List<LyricsCandidate>> findLyrics(
   String title,
   String artist, {
@@ -174,15 +176,14 @@ Future<List<LyricsCandidate>> findLyrics(
 }) async {
   final client = HttpClient()..connectionTimeout = timeout;
   try {
-    final found = await _search(
-      client,
-      title,
-      artist,
-      base,
-      maxBytes,
-    ).timeout(timeout);
-    if (found.isNotEmpty || oneLine(artist).isEmpty) return found;
-    return await _ovh(client, title, artist, ovhBase, maxBytes, timeout);
+    Future<List<LyricsCandidate>> lookUp(String t, String a) async {
+      final found = await _search(client, t, a, base, maxBytes).timeout(timeout);
+      if (found.isNotEmpty || oneLine(a).isEmpty) return found;
+      return _ovh(client, t, a, ovhBase, maxBytes, timeout);
+    }
+
+    final found = await lookUp(title, artist);
+    return found.isNotEmpty || !_canSwap(title, artist) ? found : await lookUp(artist, title);
   } on TimeoutException {
     throw const LyricsLookupException(
       'The lyrics server did not answer in time',
@@ -194,6 +195,12 @@ Future<List<LyricsCandidate>> findLyrics(
   } finally {
     client.close(force: true);
   }
+}
+
+/// Whether swapping title and artist gives another search: both are filled in and differ.
+bool _canSwap(String title, String artist) {
+  final t = oneLine(title).toLowerCase(), a = oneLine(artist).toLowerCase();
+  return t.isNotEmpty && a.isNotEmpty && t != a;
 }
 
 /// The second source, asked when LRCLIB found nothing. Whatever goes wrong here counts as

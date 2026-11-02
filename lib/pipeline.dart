@@ -6,8 +6,8 @@
 // Files of one song (in its work folder):
 //   source.mp3        the song with vocals, for playback while tapping the lyrics
 //   source.wav        44.1 kHz stereo PCM, the input of vocal removal
-//   instrumental.mp3  about 96 kbps (variable), 44.1 kHz stereo, no metadata: goes into the .karmp3
-//   vocals.mp3        about 48 kbps (variable), 44.1 kHz mono, no metadata: goes into the .karmp3 when the
+//   instrumental.mp3  96 kbps, 44.1 kHz stereo, no metadata: goes into the .karmp3
+//   vocals.mp3        48 kbps, 44.1 kHz mono, no metadata: goes into the .karmp3 when the
 //                     user includes the vocals (written before instrumental.mp3)
 
 import 'dart:async';
@@ -168,27 +168,26 @@ Loudness? parseLoudness(String ffmpegOutput) {
   );
 }
 
-/// ffmpeg: the separated WAV as the final MP3, without tags: variable bitrate averaging
-/// 96 kbps (LAME's ABR mode), with a Xing header (frame count and seek table) so that the
-/// length and seeking are exact. With [loudness] (from the first pass) the second pass
-/// applies the gain.
+/// ffmpeg: the separated WAV as the final 96 kbps MP3, without tags. Constant bitrate on
+/// purpose: browsers seek in a variable-bitrate MP3 up to about 1.4 s away from the asked time
+/// (and still report the asked time), which puts the vocals and the lyrics out of step. The
+/// Info header (frame count and seek table) gives the exact length. With [loudness] (from the
+/// first pass) the second pass applies the gain.
 List<String> encodeInstrumentalArgs(String wav, String out, {Loudness? loudness}) => [
       '-y', '-i', wav,
       if (loudness != null) ...['-af', _applyLoudness(loudness, mono: false)],
       '-map_metadata', '-1',
-      '-c:a', 'libmp3lame', '-abr', '1', '-b:a', '96k', '-write_xing', '1',
-      '-ar', '44100', '-ac', '2',
+      '-c:a', 'libmp3lame', '-b:a', '96k', '-ar', '44100', '-ac', '2',
       '-f', 'mp3', out,
     ];
 
-/// ffmpeg: the separated vocals WAV as a small MP3 (variable bitrate averaging 48 kbps,
-/// 44.1 kHz, mono, with a Xing header like the instrumental's), without tags.
+/// ffmpeg: the separated vocals WAV as a small MP3 (48 kbps constant, 44.1 kHz, mono, with
+/// an Info header like the instrumental's), without tags.
 List<String> encodeVocalsArgs(String wav, String out, {Loudness? loudness}) => [
       '-y', '-i', wav,
       if (loudness != null) ...['-af', _applyLoudness(loudness, mono: true)],
       '-map_metadata', '-1',
-      '-c:a', 'libmp3lame', '-abr', '1', '-b:a', '48k', '-write_xing', '1',
-      '-ar', '44100', '-ac', '1',
+      '-c:a', 'libmp3lame', '-b:a', '48k', '-ar', '44100', '-ac', '1',
       '-f', 'mp3', out,
     ];
 

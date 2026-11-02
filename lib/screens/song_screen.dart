@@ -815,7 +815,7 @@ class _SongScreenState extends State<SongScreen> {
               _edited((p0) => p0.includeVocals = value ?? false),
           title: const Text('Include the vocals'),
           subtitle: const Text(
-            'A separate, smaller MP3 (about 48 kbps, mono) so a player can turn the vocals on and off.',
+            'A separate, smaller MP3 (48 kbps, mono) so a player can turn the vocals on and off.',
           ),
         ),
         if (needsRerun) ...[
