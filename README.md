@@ -76,7 +76,7 @@ Nothing else leaves your computer. There is no account.
 
 **How long does vocal removal take?** It depends on your computer and the song. It runs in the background, so you can fill in the details and lyrics meanwhile.
 
-**Where are my songs saved?** In the app's folder for your user (on macOS: `~/Library/Application Support/party.kantahe.maker/projects`; older installs keep using `~/Library/Application Support/tech.loable.kantaheMaker`), saved as you go. The `.karmp3` goes where you choose. Delete a song from the list on the home screen.
+**Where are my songs saved?** In the app's folder for your user (on macOS: `~/Library/Application Support/party.kantahe.maker/projects`), saved as you go. The `.karmp3` goes where you choose. Delete a song from the list on the home screen.
 
 **What is a .karmp3?** A karaoke file: a ZIP with the song without its vocals, the lyrics with times, the song details and, if you chose it, the vocals. The format is open and described [below](#the-karmp3-format).
 

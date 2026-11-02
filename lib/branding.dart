@@ -1,6 +1,6 @@
 // The Kantahe brand: its name, colors and theme. The colors come from the main Kantahe
-// brand (/Volumes/mandark-1Tb/projects/loabletech/kantahe/branding/build.py): a dark navy
-// background with the yellow "sung" colour and the cyan accent.
+// brand repo (its branding/build.py): a dark navy background with the yellow "sung" colour
+// and the cyan accent.
 
 import 'dart:math' as math;
 
