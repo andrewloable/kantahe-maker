@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kantahe_maker/mp3_info.dart';
+import 'package:kantahe_maker/pipeline.dart';
 import 'package:kantahe_maker/tools.dart';
 
 List<int> withHeader(List<int> header, {List<int> before = const []}) => [
@@ -9,6 +10,31 @@ List<int> withHeader(List<int> header, {List<int> before = const []}) => [
   ...header,
   ...List.filled(100, 0),
 ];
+
+/// A first frame with a Xing or Info tag, as ffmpeg writes it. [frames] and [bytes] are
+/// left out of the tag when null. [crc] puts the two CRC bytes after the header.
+List<int> tagged(
+  List<int> header, {
+  String tag = 'Xing',
+  int? frames,
+  int? bytes,
+  bool mono = false,
+  bool crc = false,
+  List<int> before = const [],
+}) {
+  List<int> u32(int v) => [v >> 24 & 255, v >> 16 & 255, v >> 8 & 255, v & 255];
+  final flags = (frames != null ? 1 : 0) | (bytes != null ? 2 : 0) | 4;
+  return [
+    ...before,
+    ...header,
+    ...List.filled((mono ? 17 : 32) + (crc ? 2 : 0), 0),
+    ...tag.codeUnits,
+    ...u32(flags),
+    if (frames != null) ...u32(frames),
+    if (bytes != null) ...u32(bytes),
+    ...List.filled(100, 0),
+  ];
+}
 
 void main() {
   test('mp3_info_128', () {
@@ -84,6 +110,97 @@ void main() {
     expect(readMp3Info(withHeader([0xFF, 0xF3, 0x90, 0x00])), isNull, reason: 'MPEG-2');
   });
 
+  group('Xing and Info tags', () {
+    const h96 = [0xFF, 0xFB, 0x70, 0x00]; // 96 kbps, 44.1 kHz, stereo
+
+    test('xing_gives_the_average_and_says_variable', () {
+      // 1000 frames last 26.122 s; 360000 bytes in that time is 110 kbps.
+      final i = readMp3Info(tagged(h96, frames: 1000, bytes: 360000))!;
+      expect((i.kbps, i.hertz, i.channels, i.variable), (110, 44100, 2, true));
+    });
+
+    test('info_tag_is_constant_bitrate', () {
+      final i = readMp3Info(tagged(h96, tag: 'Info', frames: 1000, bytes: 360000))!;
+      expect((i.kbps, i.variable), (96, false));
+    });
+
+    test('xing_without_counts_keeps_the_header_bitrate', () {
+      expect(readMp3Info(tagged(h96))!.variable, isFalse);
+      expect(readMp3Info(tagged(h96, frames: 1000))!.variable, isFalse);
+      expect(readMp3Info(tagged(h96, bytes: 360000))!.variable, isFalse);
+      expect(readMp3Info(tagged(h96))!.kbps, 96);
+    });
+
+    test('xing_with_no_frames_does_not_divide_by_zero', () {
+      final i = readMp3Info(tagged(h96, frames: 0, bytes: 1000))!;
+      expect((i.kbps, i.variable), (96, false));
+    });
+
+    test('xing_mono_tag_sits_after_the_short_side_info', () {
+      // 1000 frames, 150000 bytes: 45.9 kbps.
+      final i = readMp3Info(
+        tagged([0xFF, 0xFB, 0x50, 0xC0], mono: true, frames: 1000, bytes: 150000),
+      )!;
+      expect((i.kbps, i.channels, i.variable), (46, 1, true));
+    });
+
+    test('xing_after_a_crc', () {
+      final i = readMp3Info(
+        tagged([0xFF, 0xFA, 0x70, 0x00], crc: true, frames: 1000, bytes: 360000),
+      )!;
+      expect((i.kbps, i.variable), (110, true));
+    });
+
+    test('xing_uses_the_sampling_rate', () {
+      // 96 kbps header at 48 kHz: 1000 frames last 24 s, 360000 bytes is 120 kbps.
+      final i = readMp3Info(
+        tagged([0xFF, 0xFB, 0x74, 0x00], frames: 1000, bytes: 360000),
+      )!;
+      expect((i.kbps, i.hertz), (120, 48000));
+    });
+
+    test('xing_behind_an_id3_tag', () {
+      final id3 = [0x49, 0x44, 0x33, 4, 0, 0, 0, 0, 0, 20, ...List.filled(20, 0)];
+      final i = readMp3Info(tagged(h96, frames: 1000, bytes: 360000, before: id3))!;
+      expect((i.kbps, i.variable), (110, true));
+    });
+
+    test('cut_short_tag_does_not_throw', () {
+      final all = tagged(h96, frames: 1000, bytes: 360000);
+      for (var n = 4; n < 4 + 32 + 14; n++) {
+        final i = readMp3Info(all.sublist(0, n));
+        expect(i?.kbps ?? 96, 96, reason: 'cut at $n');
+        expect(i?.variable ?? false, isFalse, reason: 'cut at $n');
+      }
+    });
+
+    test('describe_variable_and_channels', () {
+      expect(
+        describeMp3(const Mp3Info(kbps: 95, hertz: 44100, channels: 2, variable: true)),
+        'MP3, 44.1 kHz, 95 kbps average (VBR)',
+      );
+      expect(
+        describeMp3(
+          const Mp3Info(kbps: 48, hertz: 44100, channels: 1, variable: true),
+          withChannels: true,
+        ),
+        'MP3, 44.1 kHz, 48 kbps average (VBR), mono',
+      );
+      expect(
+        describeMp3(const Mp3Info(kbps: 64, hertz: 44100, channels: 1), withChannels: true),
+        'MP3, 44.1 kHz, 64 kbps, mono',
+      );
+      expect(
+        describeMp3(const Mp3Info(kbps: 128, hertz: 44100, channels: 2), withChannels: true),
+        'MP3, 44.1 kHz, 128 kbps, stereo',
+      );
+      expect(
+        describeMp3(const Mp3Info(kbps: 128, hertz: 44100, channels: 2)),
+        'MP3, 44.1 kHz, 128 kbps',
+      );
+    });
+  });
+
   test('describe_mp3', () {
     expect(describeMp3(const Mp3Info(kbps: 128, hertz: 44100, channels: 2)), 'MP3, 44.1 kHz, 128 kbps');
     expect(describeMp3(const Mp3Info(kbps: 128, hertz: 48000, channels: 2)), 'MP3, 48 kHz, 128 kbps');
@@ -115,6 +232,55 @@ void main() {
     for (final (bitrate, channels, kbps) in [('128k', '2', 128), ('192k', '2', 192), ('64k', '1', 64)]) {
       final i = made(bitrate, channels)!;
       expect((i.kbps, i.hertz, i.channels), (kbps, 44100, int.parse(channels)), reason: bitrate);
+    }
+  }, skip: ffmpeg == null ? 'ffmpeg not found' : false);
+
+  // What the app really makes: variable bitrate, with a Xing header that has the frame count
+  // (exact length) and a seek table.
+  test('mp3_info_reads_the_files_the_app_encodes', () {
+    final tmp = Directory.systemTemp.createTempSync('mp3_abr');
+    addTearDown(() => tmp.deleteSync(recursive: true));
+    final ffprobe = findExecutable(
+      'ffprobe',
+      os: host.$1,
+      tools: ToolsDir('/nonexistent-tools'),
+      env: Platform.environment,
+      extraDirs: defaultExtraDirs(host.$1),
+    );
+    final wav = '${tmp.path}/in.wav';
+    final made = Process.runSync(ffmpeg!, [
+      '-v', 'error', '-y', '-f', 'lavfi', '-i', 'anoisesrc=d=6:c=pink:r=44100:a=0.3',
+      '-ac', '2', '-ar', '44100', wav,
+    ]);
+    if (made.exitCode != 0) throw Exception('ffmpeg failed: ${made.stderr}');
+    for (final (name, args, channels, low, high) in [
+      ('instrumental', encodeInstrumentalArgs(wav, '${tmp.path}/i.mp3'), 2, 60, 130),
+      ('vocals', encodeVocalsArgs(wav, '${tmp.path}/v.mp3'), 1, 30, 70),
+    ]) {
+      final out = args.last;
+      final r = Process.runSync(ffmpeg, ['-v', 'error', ...args]);
+      if (r.exitCode != 0) throw Exception('ffmpeg failed: ${r.stderr}');
+      final bytes = File(out).readAsBytesSync();
+      final i = readMp3Info(bytes)!;
+      expect(i.variable, isTrue, reason: name);
+      expect(i.channels, channels, reason: name);
+      expect(i.kbps, inInclusiveRange(low, high), reason: name);
+      // The tag says: frame count, byte count and TOC.
+      var at = -1;
+      for (var k = 0; k < 400 && at < 0; k++) {
+        if (String.fromCharCodes(bytes.sublist(k, k + 4)) == 'Xing') at = k;
+      }
+      expect(at, greaterThan(0), reason: '$name has a Xing tag');
+      final flags = bytes[at + 4] << 24 | bytes[at + 5] << 16 | bytes[at + 6] << 8 | bytes[at + 7];
+      expect(flags & 7, 7, reason: '$name: frames, bytes and TOC');
+      final frames = bytes[at + 8] << 24 | bytes[at + 9] << 16 | bytes[at + 10] << 8 | bytes[at + 11];
+      if (ffprobe != null) {
+        final c = Process.runSync(ffprobe, [
+          '-v', 'error', '-count_frames', '-select_streams', 'a',
+          '-show_entries', 'stream=nb_read_frames', '-of', 'csv=p=0', out,
+        ]);
+        expect(int.parse((c.stdout as String).trim()), frames, reason: '$name frame count');
+      }
     }
   }, skip: ffmpeg == null ? 'ffmpeg not found' : false);
 }

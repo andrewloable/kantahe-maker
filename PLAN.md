@@ -28,8 +28,9 @@ first unfinished step.
 2. **Remove vocals**: runs in the background, so the user may go on to the next steps; a status
    line on them says how it is going. `audio-separator` (UVR models) turns `source.wav` into an
    instrumental WAV and a vocals WAV in one run. ffmpeg encodes the vocals as `vocals.mp3`
-   (libmp3lame, 64 kbps, 44.1 kHz, mono) and then the instrumental as `instrumental.mp3`
-   (libmp3lame, 128 kbps, 44.1 kHz stereo). Each stem is first measured and then brought to
+   (libmp3lame, variable bitrate averaging 48 kbps via `-abr 1`, 44.1 kHz, mono) and then the
+   instrumental as `instrumental.mp3` (libmp3lame, variable bitrate averaging 96 kbps, 44.1 kHz
+   stereo). Both get a Xing header (`-write_xing 1`: frame count and seek table). Each stem is first measured and then brought to
    about -16 LUFS (two passes of ffmpeg `loudnorm`; a silent stem is left as it is), so the
    vocals end up as loud as the instrumental. Only Export waits for it.
 3. **Details**: title, artist, and optionally songbook number, composer and lyricist. A blank
@@ -135,8 +136,12 @@ test/                    one *_test.dart per lib file; pure logic first, widget 
 - **The macOS App Sandbox is turned off.** The app runs binaries it downloaded, and the
   sandbox would block them. This is acceptable because the app is not headed for the Mac
   App Store.
-- **Instrumental bitrate is fixed at 128 kbps** (it was 192 kbps up to version 1.0.x; the `.nfo`
-  Audio row says what a file really has). A setting can be added if someone asks for one.
+- **MP3 bitrates are fixed**: the instrumental is variable bitrate averaging 96 kbps and the
+  vocals 48 kbps (LAME ABR, with a Xing header for exact length and seeking). They were constant
+  128 and 64 kbps in 1.1.x, and the instrumental 192 kbps up to 1.0.x; the `.nfo` Audio and
+  Vocals audio rows say what a file really has (the average, from the Xing tag, for variable
+  files). ABR was chosen over quality-based VBR because it honours the chosen bitrates and
+  gives a predictable size. A setting can be added if someone asks for one.
 
 ## How the work is run
 

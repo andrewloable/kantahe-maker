@@ -141,6 +141,33 @@ void main() {
       }
     });
 
+    test('export_vocals_audio_row_follows_the_file', () async {
+      // A Xing tag for 1000 frames and 150000 bytes: 46 kbps on average.
+      List<int> u32(int v) => [v >> 24 & 255, v >> 16 & 255, v >> 8 & 255, v & 255];
+      final variable = [
+        0xFF, 0xFB, 0x50, 0xC0, ...List.filled(17, 0),
+        ...'Xing'.codeUnits, ...u32(3), ...u32(1000), ...u32(150000), ...List.filled(100, 0),
+      ];
+      for (final (bytes, row) in [
+        ([0xFF, 0xFB, 0x50, 0xC0, ...List.filled(100, 0)], 'Vocals audio   : MP3, 44.1 kHz, 64 kbps, mono'),
+        (variable, 'Vocals audio   : MP3, 44.1 kHz, 46 kbps average (VBR), mono'),
+      ]) {
+        File('${work.path}/vocals.mp3').writeAsBytesSync(bytes);
+        final dest = '${tmp.path}/${bytes.length}.karmp3';
+        await exportKarMp3(ready()..includeVocals = true, work, dest, durationSeconds: 10);
+        expect(text(entries(dest)['A - T.nfo']!).split('\n'), contains(row));
+      }
+    });
+
+    test('export_vocals_audio_row_is_left_out_when_unreadable', () async {
+      File('${work.path}/vocals.mp3').writeAsBytesSync([7, 7]);
+      final dest = '${tmp.path}/out.karmp3';
+      await exportKarMp3(ready()..includeVocals = true, work, dest, durationSeconds: 10);
+      final nfo = text(entries(dest)['A - T.nfo']!);
+      expect(nfo, contains('Vocals         : A - T.vocals.mp3'));
+      expect(nfo, isNot(contains('Vocals audio')));
+    });
+
     test('export_audio_row_is_left_out_when_unreadable', () async {
       final dest = '${tmp.path}/out.karmp3';
       await exportKarMp3(ready(), work, dest, durationSeconds: 10); // the [9, 9] file
@@ -186,12 +213,13 @@ void main() {
     });
 
     test('export_with_vocals', () async {
-      File('${work.path}/vocals.mp3').writeAsBytesSync([7, 7]);
+      final vocalsBytes = [0xFF, 0xFB, 0x50, 0xC0, ...List.filled(100, 7)]; // 64 kbps mono
+      File('${work.path}/vocals.mp3').writeAsBytesSync(vocalsBytes);
       final dest = '${tmp.path}/out.karmp3';
       await exportKarMp3(ready()..includeVocals = true, work, dest, durationSeconds: 10);
       final e = entries(dest);
       expect(e.keys.toList(), ['A - T.mp3', 'A - T.lrc', 'A - T.nfo', 'A - T.vocals.mp3']);
-      expect(e['A - T.vocals.mp3'], [7, 7]);
+      expect(e['A - T.vocals.mp3'], vocalsBytes);
       final nfo = text(e['A - T.nfo']!).split('\n');
       expect(nfo, contains('Vocals         : A - T.vocals.mp3'));
       expect(nfo, contains('Vocals audio   : MP3, 44.1 kHz, 64 kbps, mono'));

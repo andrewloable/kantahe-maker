@@ -72,6 +72,7 @@ Future<void> exportKarMp3(
   // too (their instrumental has another bitrate). Left out when it cannot be read.
   final instrumentalBytes = await mp3.readAsBytes();
   final instrumentalInfo = readMp3Info(instrumentalBytes);
+  final vocalsInfo = p.includeVocals ? readMp3Info(await vocals.readAsBytes()) : null;
 
   final lines = p.lyricLines();
   final session = TapSession(
@@ -100,7 +101,7 @@ Future<void> exportKarMp3(
     separator: separatorModel.replaceAll(RegExp(r'\.onnx$'), ''),
     instrumental: '$name.mp3',
     vocals: p.includeVocals ? '$name.vocals.mp3' : '',
-    vocalsAudio: p.includeVocals ? 'MP3, 44.1 kHz, 64 kbps, mono' : '',
+    vocalsAudio: vocalsInfo == null ? '' : describeMp3(vocalsInfo, withChannels: true),
     lyricLines: lines.length,
     lyricTiming: switch (p.timingSource) {
       'lrclib' => 'from lrclib.net synced lyrics',

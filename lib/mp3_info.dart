@@ -1,18 +1,27 @@
 // What an MP3 file says about itself in its first frame header: bitrate, sampling rate and
-// channels. Used to describe the instrumental in the .nfo as it really is.
+// channels; and, for a variable-bitrate file, its average from the Xing tag. Used to describe
+// the MP3s in the .nfo as they really are.
 // Pure Dart: no Flutter imports.
 
 class Mp3Info {
+  /// The bitrate of the first frame header, or the average when [variable].
   final int kbps, hertz, channels;
+
+  /// True for a variable-bitrate file (a Xing tag with its frame and byte counts), whose
+  /// first frame header says nothing about the average.
+  final bool variable;
   const Mp3Info({
     required this.kbps,
     required this.hertz,
     required this.channels,
+    this.variable = false,
   });
 }
 
 /// The bitrate, sampling rate and channels in the first MPEG-1 Layer III frame header of
-/// [bytes] (after an ID3v2 tag, if any), or null when there is none. Never throws.
+/// [bytes] (after an ID3v2 tag, if any), or null when there is none. A Xing tag after the
+/// header (variable bitrate) with both its counts gives the average bitrate instead. An
+/// Info tag (constant bitrate) changes nothing. Never throws.
 Mp3Info? readMp3Info(List<int> bytes) {
   var start = 0;
   if (bytes.length >= 10 &&
@@ -33,22 +42,45 @@ Mp3Info? readMp3Info(List<int> bytes) {
     final kbps = _kbps[bytes[i + 2] >> 4];
     final hertz = _hertz[(bytes[i + 2] >> 2) & 3];
     if (kbps == 0 || hertz == 0) continue;
+    final mono = (bytes[i + 3] >> 6) == 3;
+    final average = _xingAverage(
+      bytes,
+      i + 4 + ((bytes[i + 1] & 1) == 0 ? 2 : 0) + (mono ? 17 : 32),
+      hertz,
+    );
     return Mp3Info(
-      kbps: kbps,
+      kbps: average ?? kbps,
       hertz: hertz,
-      channels: (bytes[i + 3] >> 6) == 3 ? 1 : 2,
+      channels: mono ? 1 : 2,
+      variable: average != null,
     );
   }
   return null;
 }
 
+/// The average kbps from a Xing tag at [at], or null when there is none, it lacks the
+/// frame or byte count, or [bytes] ends inside it. One MPEG-1 Layer III frame is 1152 samples.
+int? _xingAverage(List<int> bytes, int at, int hertz) {
+  if (at + 8 > bytes.length) return null;
+  if (String.fromCharCodes(bytes.sublist(at, at + 4)) != 'Xing') return null;
+  final flags = _u32(bytes, at + 4);
+  if (flags & 3 != 3 || at + 16 > bytes.length) return null;
+  final frames = _u32(bytes, at + 8), size = _u32(bytes, at + 12);
+  if (frames == 0 || size == 0) return null;
+  return (size * 8 * hertz / (frames * 1152 * 1000)).round();
+}
+
+int _u32(List<int> b, int i) => b[i] << 24 | b[i + 1] << 16 | b[i + 2] << 8 | b[i + 3];
+
 // MPEG-1 Layer III, by the 4-bit index (0 is free format, 15 is not valid).
 const _kbps = [0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 0];
 const _hertz = [44100, 48000, 32000, 0];
 
-/// "MP3, 44.1 kHz, 128 kbps".
-String describeMp3(Mp3Info info) {
+/// "MP3, 44.1 kHz, 128 kbps"; "MP3, 44.1 kHz, 95 kbps average (VBR)" for a variable-bitrate
+/// file. With [withChannels] it ends with ", mono" or ", stereo".
+String describeMp3(Mp3Info info, {bool withChannels = false}) {
   final khz = info.hertz / 1000;
   final text = khz == khz.roundToDouble() ? khz.toInt().toString() : khz.toString();
-  return 'MP3, $text kHz, ${info.kbps} kbps';
+  final rate = info.variable ? '${info.kbps} kbps average (VBR)' : '${info.kbps} kbps';
+  return 'MP3, $text kHz, $rate${withChannels ? ', ${info.channels == 1 ? 'mono' : 'stereo'}' : ''}';
 }

@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:kantahe_maker/mp3_info.dart';
 import 'package:kantahe_maker/pipeline.dart';
 import 'package:kantahe_maker/tool_pins.dart';
 import 'package:kantahe_maker/tools.dart';
@@ -99,7 +100,7 @@ void main() {
     });
     test('args_encode_instrumental', () {
       final a = encodeInstrumentalArgs('i.wav', 'o.mp3');
-      expect(hasSeq(a, ['-b:a', '128k']), isTrue);
+      expect(hasSeq(a, ['-abr', '1', '-b:a', '96k', '-write_xing', '1']), isTrue);
       expect(hasSeq(a, ['-map_metadata', '-1']), isTrue);
       expect(hasSeq(a, ['-c:a', 'libmp3lame']), isTrue);
       expect(hasSeq(a, ['-ar', '44100']), isTrue);
@@ -185,13 +186,15 @@ void main() {
         'measured_LRA=2.2:measured_thresh=-17.56:offset=-0.01:linear=true';
     expect(encodeInstrumentalArgs('i.wav', 'o.mp3', loudness: l), [
       '-y', '-i', 'i.wav', '-af', filter, '-map_metadata', '-1',
-      '-c:a', 'libmp3lame', '-b:a', '128k', '-ar', '44100', '-ac', '2',
+      '-c:a', 'libmp3lame', '-abr', '1', '-b:a', '96k', '-write_xing', '1',
+      '-ar', '44100', '-ac', '2',
       '-f', 'mp3', 'o.mp3',
     ]);
     expect(encodeVocalsArgs('v.wav', 'o.mp3', loudness: l), [
       '-y', '-i', 'v.wav', '-af', 'aformat=channel_layouts=mono,$filter',
       '-map_metadata', '-1',
-      '-c:a', 'libmp3lame', '-b:a', '64k', '-ar', '44100', '-ac', '1',
+      '-c:a', 'libmp3lame', '-abr', '1', '-b:a', '48k', '-write_xing', '1',
+      '-ar', '44100', '-ac', '1',
       '-f', 'mp3', 'o.mp3',
     ]);
   });
@@ -199,7 +202,8 @@ void main() {
   test('args_encode_vocals', () {
     expect(encodeVocalsArgs('v.wav', 'o.mp3'), [
       '-y', '-i', 'v.wav', '-map_metadata', '-1',
-      '-c:a', 'libmp3lame', '-b:a', '64k', '-ar', '44100', '-ac', '1',
+      '-c:a', 'libmp3lame', '-abr', '1', '-b:a', '48k', '-write_xing', '1',
+      '-ar', '44100', '-ac', '1',
       '-f', 'mp3', 'o.mp3',
     ]);
   });
@@ -689,19 +693,19 @@ cp "__V__" "$out/x_(Vocals)_m.wav"
       expect(leftovers(work), isEmpty);
       expect(lines, contains('working'));
       expect(
-        probe(
-          '${work.path}/instrumental.mp3',
-          'stream=codec_name,sample_rate,channels,bit_rate',
-        ),
-        'mp3,44100,2,128000',
+        probe('${work.path}/instrumental.mp3', 'stream=codec_name,sample_rate,channels'),
+        'mp3,44100,2',
       );
       expect(
-        probe(
-          '${work.path}/vocals.mp3',
-          'stream=codec_name,sample_rate,channels,bit_rate',
-        ),
-        'mp3,44100,1,64000',
+        probe('${work.path}/vocals.mp3', 'stream=codec_name,sample_rate,channels'),
+        'mp3,44100,1',
       );
+      // Variable bitrate with a Xing header that has a seek table (TOC).
+      for (final f in ['instrumental', 'vocals']) {
+        final info = readMp3Info(File('${work.path}/$f.mp3').readAsBytesSync())!;
+        expect(info.variable, isTrue, reason: f);
+        expect(xingFlags('${work.path}/$f.mp3')! & 4, 4, reason: '$f has a TOC');
+      }
       final lengthOfInstrumental = await durationSeconds(
         realTools(),
         '${work.path}/instrumental.mp3',
@@ -901,9 +905,9 @@ echo wav > "$out/x_(Vocals)_m.wav"
       await job.done;
       expect(loudnessOf('${work.path}/instrumental.mp3'), closeTo(-16, 1.0));
       expect(loudnessOf('${work.path}/vocals.mp3'), closeTo(-16, 1.0));
-      const entries = 'stream=codec_name,sample_rate,channels,bit_rate';
-      expect(probe('${work.path}/instrumental.mp3', entries), 'mp3,44100,2,128000');
-      expect(probe('${work.path}/vocals.mp3', entries), 'mp3,44100,1,64000');
+      const entries = 'stream=codec_name,sample_rate,channels';
+      expect(probe('${work.path}/instrumental.mp3', entries), 'mp3,44100,2');
+      expect(probe('${work.path}/vocals.mp3', entries), 'mp3,44100,1');
       expect(leftovers(work), isEmpty);
     }, skip: noShOrFfmpeg);
 
@@ -1125,4 +1129,17 @@ String _fakeScript(String dir, String name, String body) {
   final file = File('$dir/$name')..writeAsStringSync('#!/bin/sh\n$body\n');
   if (!Platform.isWindows) Process.runSync('chmod', ['+x', file.path]);
   return file.path;
+}
+
+/// The flags of the Xing or Info tag in the first frame of the MP3 [path] (1 frame count,
+/// 2 byte count, 4 TOC), or null when there is no tag.
+int? xingFlags(String path) {
+  final b = File(path).readAsBytesSync();
+  for (var i = 0; i + 12 < b.length && i < 400; i++) {
+    final tag = String.fromCharCodes(b.sublist(i, i + 4));
+    if (tag == 'Xing' || tag == 'Info') {
+      return b[i + 4] << 24 | b[i + 5] << 16 | b[i + 6] << 8 | b[i + 7];
+    }
+  }
+  return null;
 }

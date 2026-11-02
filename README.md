@@ -129,6 +129,7 @@ and off.
 |---|---|
 | 1.0.x | `NAME.mp3`, `NAME.lrc`, `NAME.nfo`. The `.nfo` has no `Instrumental` row. The instrumental is 192 kbps and not normalized |
 | 1.1 and later | The same, and the `.nfo` always has an `Instrumental` row. `NAME.vocals.mp3` is added when the user chose to include the vocals. The instrumental is 128 kbps for songs processed by 1.1 (192 kbps for songs processed earlier); both MP3s are normalized to about -16 LUFS |
+| 1.2 and later | The same, but both MP3s are variable bitrate (the instrumental averages about 96 kbps, the vocals about 48 kbps) with a Xing header (frame count and seek table). The `Audio` and `Vocals audio` rows say "average (VBR)" |
 
 ### Files in the archive
 
@@ -137,7 +138,7 @@ and off.
 | `NAME.mp3` | the **instrumental**: the song with its vocals removed (MP3, 44.1 kHz, stereo) |
 | `NAME.lrc` | the lyrics with times: tag lines, then one timed line per lyric line (see "The .lrc file") |
 | `NAME.nfo` | the song's details as aligned `Key : value` lines (see "The .nfo file") |
-| `NAME.vocals.mp3` | optional, only when the user included the vocals: the vocals alone (MP3, 44.1 kHz, 64 kbps, mono), with the same length and start as `NAME.mp3`, so a player can play the two together in step |
+| `NAME.vocals.mp3` | optional, only when the user included the vocals: the vocals alone (MP3, 44.1 kHz, mono; about 48 kbps variable since 1.2, 64 kbps constant in 1.1), with the same length and start as `NAME.mp3`, so a player can play the two together in step |
 
 - **`NAME`** is `NNNNN - Artist - Title` when the song has a songbook number (padded to 5
   digits), and `Artist - Title` when it has not. Artist and title are cleaned the same way:
@@ -153,6 +154,12 @@ and off.
 - **Loudness**: since 1.1.0 both MP3s are normalized to about -16 LUFS each, so the vocals
   are as loud as the instrumental, not at their original level. A player that mixes them may
   want to lower the vocals. Older files are not normalized.
+- **Variable bitrate**: since 1.2 both MP3s are variable bitrate (LAME "ABR": the instrumental
+  averages about 96 kbps, the vocals about 48 kbps). Each starts with a Xing tag in its first
+  frame that holds the number of frames and bytes and a 100-entry seek table. A player should
+  take the exact length from the frame count (1152 samples per frame at 44.1 kHz) and must not
+  assume a constant bitrate when it estimates length or seeks. A file without a Xing tag, or
+  with an Info tag, is constant bitrate. The first frame header does not tell the average.
 - **Nothing else** goes in the archive (no video, no original audio). A reader should ignore
   entries it does not know.
 - **Times** in the `.lrc` count from the start of `NAME.mp3` (and of `NAME.vocals.mp3`, which
@@ -198,11 +205,11 @@ order or on a row being there unless the table says "always"):
 | `Composer` | when given | the composer |
 | `Lyricist` | when given | the lyricist |
 | `Duration` | always | `m:ss`, rounded to whole seconds (`3:47`) |
-| `Audio` | when the instrumental could be read | what the instrumental really is: `MP3, 44.1 kHz, 128 kbps` (`192 kbps` in files made from songs processed by 1.0.x) |
+| `Audio` | when the instrumental could be read | what the instrumental really is: `MP3, 44.1 kHz, 95 kbps average (VBR)` for a variable-bitrate file (the average from its Xing tag), `MP3, 44.1 kHz, 128 kbps` for a constant-bitrate one (`192 kbps` in files made from songs processed by 1.0.x) |
 | `Vocals removed` | always | the name of the model that removed the vocals (`UVR-MDX-NET-Inst_HQ_3`) |
 | `Instrumental` | always in files made by 1.1 and later | the name of the instrumental's entry in the archive (`NAME.mp3`) |
 | `Vocals` | only when the vocals are included | the name of the vocals' entry (`NAME.vocals.mp3`) |
-| `Vocals audio` | only when the vocals are included | `MP3, 44.1 kHz, 64 kbps, mono` |
+| `Vocals audio` | only when the vocals are included and could be read | what the vocals really are, in the same words as `Audio` and then the channels: `MP3, 44.1 kHz, 48 kbps average (VBR), mono` (`MP3, 44.1 kHz, 64 kbps, mono` in files made by 1.1) |
 | `Lyrics` | always | `timed (.lrc, N lines)` |
 | `Lyric timing` | always | where the times come from: `tapped by hand in Kantahe Maker`, or `from lrclib.net synced lyrics` (times that came with the lyrics and were not changed), or `from lrclib.net synced lyrics, corrected by hand in Kantahe Maker` |
 
@@ -224,8 +231,10 @@ order or on a row being there unless the table says "always"):
 ### Writing a .karmp3
 
 1. Build `NAME` as described above and write `NAME.mp3` (44.1 kHz stereo MP3, no tags,
-   normalized to about -16 LUFS). With vocals, write `NAME.vocals.mp3` the same length (mono,
-   44.1 kHz, 64 kbps, same loudness).
+   variable bitrate averaging about 96 kbps with a Xing tag, normalized to about -16 LUFS).
+   With vocals, write `NAME.vocals.mp3` the same length (mono, 44.1 kHz, variable bitrate
+   averaging about 48 kbps with a Xing tag, same loudness). With ffmpeg: `-c:a libmp3lame
+   -abr 1 -b:a 96k -write_xing 1` (`48k` for the vocals).
 2. Write `NAME.lrc` with the tag lines and the timed lines, using the timestamp rules above.
 3. Write `NAME.nfo` with the rows above in that order. Always write `Instrumental`; write
    `Vocals` and `Vocals audio` only when the vocals entry is in the archive. Describe the
@@ -258,11 +267,11 @@ Song number    : 101
 Composer       : John Newton
 Lyricist       : John Newton
 Duration       : 3:47
-Audio          : MP3, 44.1 kHz, 128 kbps
+Audio          : MP3, 44.1 kHz, 96 kbps average (VBR)
 Vocals removed : UVR-MDX-NET-Inst_HQ_3
 Instrumental   : 00101 - Traditional - Amazing Grace.mp3
 Vocals         : 00101 - Traditional - Amazing Grace.vocals.mp3
-Vocals audio   : MP3, 44.1 kHz, 64 kbps, mono
+Vocals audio   : MP3, 44.1 kHz, 48 kbps average (VBR), mono
 Lyrics         : timed (.lrc, 4 lines)
 Lyric timing   : tapped by hand in Kantahe Maker
 ```
