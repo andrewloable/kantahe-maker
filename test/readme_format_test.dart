@@ -10,7 +10,8 @@ import 'package:kantahe_maker/tool_pins.dart';
 // step with the code that writes them.
 
 String readmeSection() {
-  final text = File('README.md').readAsStringSync();
+  // A Windows checkout may turn the line ends into CRLF.
+  final text = File('README.md').readAsStringSync().replaceAll('\r\n', '\n');
   final start = text.indexOf('## The .karmp3 format');
   if (start < 0) fail('README.md has no section "The .karmp3 format"');
   final next = text.indexOf(RegExp(r'^## ', multiLine: true), start + 5);
@@ -19,12 +20,19 @@ String readmeSection() {
 
 /// The text of the code block tagged [tag] in the section.
 String block(String tag) {
-  final m = RegExp('```$tag\\n(.*?)```', dotAll: true).firstMatch(readmeSection());
+  final m = RegExp(
+    '```$tag\\n(.*?)```',
+    dotAll: true,
+  ).firstMatch(readmeSection());
   if (m == null) fail('README.md has no code block tagged "$tag"');
   return m.group(1)!;
 }
 
-final name = karMp3Name(number: 101, artist: 'Traditional', title: 'Amazing Grace');
+final name = karMp3Name(
+  number: 101,
+  artist: 'Traditional',
+  title: 'Amazing Grace',
+);
 
 Nfo exampleNfo() => Nfo(
   title: 'Amazing Grace',
@@ -54,7 +62,12 @@ void main() {
       lines: const [
         LrcLine(12.5, 'Amazing grace, how sweet the sound'),
         LrcLine(17.8, 'That saved a wretch like me'),
-        LrcLine(23.1, '', [(23.1, 'I '), (23.4, 'once '), (23.8, 'was '), (24.1, 'lost,')]),
+        LrcLine(23.1, '', [
+          (23.1, 'I '),
+          (23.4, 'once '),
+          (23.8, 'was '),
+          (24.1, 'lost,'),
+        ]),
         LrcLine(28.0, 'But now am found'),
       ],
     );
@@ -63,12 +76,22 @@ void main() {
 
   test('readme_listing_names_match_the_code', () {
     final listing = block('text');
-    for (final entry in ['$name.mp3', '$name.lrc', '$name.nfo', '$name.vocals.mp3']) {
+    for (final entry in [
+      '$name.mp3',
+      '$name.lrc',
+      '$name.nfo',
+      '$name.vocals.mp3',
+    ]) {
       expect(listing, contains(entry));
     }
     // In the order the writer uses.
     final at = [
-      for (final e in ['$name.mp3', '$name.lrc', '$name.nfo', '$name.vocals.mp3'])
+      for (final e in [
+        '$name.mp3',
+        '$name.lrc',
+        '$name.nfo',
+        '$name.vocals.mp3',
+      ])
         listing.indexOf(RegExp('${RegExp.escape(e)}\$', multiLine: true)),
     ];
     expect(at, [...at]..sort());
@@ -86,10 +109,18 @@ void main() {
     final end = section.indexOf('\n### ', start + 5);
     final table = section.substring(start, end < 0 ? section.length : end);
     final documented = [
-      for (final m in RegExp(r'^\| `([^`]+)` \|', multiLine: true).allMatches(table))
+      for (final m in RegExp(
+        r'^\| `([^`]+)` \|',
+        multiLine: true,
+      ).allMatches(table))
         m.group(1)!,
     ];
-    expect(documented, keys, reason: 'the README table lists the .nfo rows in the order they are written');
+    expect(
+      documented,
+      keys,
+      reason:
+          'the README table lists the .nfo rows in the order they are written',
+    );
   });
 
   // ---- the part of the README for people who just want to use the app
@@ -108,8 +139,10 @@ void main() {
   test('readme_images_exist', () {
     final text = readme();
     final paths = [
-      for (final m in RegExp(r'(?:src|srcset)="([^"]+)"').allMatches(text)) m.group(1)!,
-      for (final m in RegExp(r'!\[[^\]]*\]\(([^)\s]+)\)').allMatches(text)) m.group(1)!,
+      for (final m in RegExp(r'(?:src|srcset)="([^"]+)"').allMatches(text))
+        m.group(1)!,
+      for (final m in RegExp(r'!\[[^\]]*\]\(([^)\s]+)\)').allMatches(text))
+        m.group(1)!,
     ];
     expect(paths, isNotEmpty);
     for (final path in paths) {
@@ -132,7 +165,11 @@ void main() {
       ])
         text.indexOf(h),
     ];
-    expect(at.every((i) => i >= 0), isTrue, reason: 'every section is there: $at');
+    expect(
+      at.every((i) => i >= 0),
+      isTrue,
+      reason: 'every section is there: $at',
+    );
     expect(at, [...at]..sort(), reason: 'in this order');
     expect(text, contains('kantahe.party'));
   });
@@ -154,22 +191,37 @@ void main() {
 
   test('readme_privacy_names_every_service', () {
     final privacy = part('Your privacy');
-    for (final word in ['musicbrainz.org', 'lrclib.net', 'lyrics.ovh', '1.4 GB']) {
+    for (final word in [
+      'musicbrainz.org',
+      'lrclib.net',
+      'lyrics.ovh',
+      '1.4 GB',
+    ]) {
       expect(privacy, contains(word), reason: word);
     }
   });
 
   test('readme_download_names_every_file', () {
     final download = part('Download');
-    for (final word in ['releases/latest', 'macos.zip', 'windows.zip', 'linux.tar.gz', 'libmpv']) {
+    for (final word in [
+      'releases/latest',
+      'macos.zip',
+      'windows.zip',
+      'linux.tar.gz',
+      'libmpv',
+    ]) {
       expect(download, contains(word), reason: word);
     }
   });
 
   test('readme_lists_the_file_types', () {
     final source = File('lib/screens/home_screen.dart').readAsStringSync();
-    final list = RegExp(r"extensions:\s*\[([^\]]+)\]").firstMatch(source)!.group(1)!;
-    final types = [for (final m in RegExp(r"'([a-z0-9]+)'").allMatches(list)) m.group(1)!];
+    final list = RegExp(r"extensions:\s*\[([^\]]+)\]")
+        .firstMatch(source)!
+        .group(1)!;
+    final types = [
+      for (final m in RegExp(r"'([a-z0-9]+)'").allMatches(list)) m.group(1)!,
+    ];
     expect(types, isNotEmpty);
     final faq = part('FAQ');
     final start = faq.indexOf('**Which files can I use?**');
