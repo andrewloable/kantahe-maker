@@ -6,7 +6,9 @@
 // Files of one song (in its work folder):
 //   source.mp3        the song with vocals, for playback while tapping the lyrics
 //   source.wav        44.1 kHz stereo PCM, the input of vocal removal
-//   instrumental.mp3  192 kbps, 44.1 kHz stereo, no metadata: goes into the .karmp3
+//   instrumental.mp3  128 kbps, 44.1 kHz stereo, no metadata: goes into the .karmp3
+//   vocals.mp3        64 kbps, 44.1 kHz mono, no metadata: goes into the .karmp3 when the
+//                     user includes the vocals (written before instrumental.mp3)
 
 import 'dart:async';
 import 'dart:convert';
@@ -68,13 +70,120 @@ List<String> separateArgs(String wav, String outDir, String modelDir) => [
       '--model_file_dir', modelDir,
       '--output_dir', outDir,
       '--output_format', 'WAV',
-      '--single_stem', singleStemInstrumental,
     ];
 
-/// ffmpeg: the separated WAV as the final 192 kbps MP3, without tags.
-List<String> encodeInstrumentalArgs(String wav, String out) => [
-      '-y', '-i', wav, '-map_metadata', '-1',
-      '-c:a', 'libmp3lame', '-b:a', '192k', '-ar', '44100', '-ac', '2',
+/// Every MP3 made from a stem is brought to this integrated loudness (EBU R128), so
+/// songs and the two tracks of a song play at a steady level.
+const targetLoudnessLufs = -16.0;
+
+/// The loudest peak allowed after the gain (true peak, dB).
+const targetTruePeakDb = -1.5;
+
+/// ffmpeg loudnorm's loudness range target.
+const targetLoudnessRange = 11.0;
+
+/// A stem measured quieter than this (LUFS) is treated as silent and left as it is: a
+/// gain would only raise noise.
+const silenceFloorLufs = -50.0;
+
+/// What ffmpeg's loudnorm measured on a stem (its first pass).
+class Loudness {
+  final double input, truePeak, range, threshold, offset;
+  const Loudness({
+    required this.input,
+    required this.truePeak,
+    required this.range,
+    required this.threshold,
+    required this.offset,
+  });
+}
+
+/// ffmpeg, first pass: measures [wav] with loudnorm and prints the result as JSON.
+/// With [mono] the stem is mixed down first, so the measurement matches the mono MP3.
+List<String> measureLoudnessArgs(String wav, {required bool mono}) => [
+      '-hide_banner', '-nostats', '-i', wav,
+      '-af', _loudnormFilter(mono: mono, options: 'print_format=json'),
+      '-f', 'null', '-',
+    ];
+
+/// A number as ffmpeg's filter options want it: no ".0" on whole numbers, no exponent.
+String _num(double v) {
+  if (v == v.roundToDouble() && v.abs() < 1e9) return v.toInt().toString();
+  final s = v.toString();
+  return s.contains('e') ? v.toStringAsFixed(6) : s;
+}
+
+/// The loudnorm filter with the targets; the vocals are mixed down to mono first, so the
+/// measurement and the gain are those of the mono MP3 that is made from them.
+String _loudnormFilter({required bool mono, String options = ''}) =>
+    '${mono ? 'aformat=channel_layouts=mono,' : ''}'
+    'loudnorm=I=${_num(targetLoudnessLufs)}:TP=${_num(targetTruePeakDb)}'
+    ':LRA=${_num(targetLoudnessRange)}${options.isEmpty ? '' : ':$options'}';
+
+/// The second pass: the gain that brings the stem measured as [l] to the targets.
+String _applyLoudness(Loudness l, {required bool mono}) => _loudnormFilter(
+  mono: mono,
+  options:
+      'measured_I=${_num(l.input)}:measured_TP=${_num(l.truePeak)}'
+      ':measured_LRA=${_num(l.range)}:measured_thresh=${_num(l.threshold)}'
+      ':offset=${_num(l.offset)}:linear=true',
+);
+
+/// The measurement in ffmpeg's output (the last {...} block), or null when it is missing
+/// or not a finite number (silence is measured as -inf).
+Loudness? parseLoudness(String ffmpegOutput) {
+  final end = ffmpegOutput.lastIndexOf('}');
+  final start = end < 0 ? -1 : ffmpegOutput.lastIndexOf('{', end);
+  if (start < 0) return null;
+  final Object? json;
+  try {
+    json = jsonDecode(ffmpegOutput.substring(start, end + 1));
+  } on FormatException {
+    return null;
+  }
+  if (json is! Map) return null;
+  final fields = json;
+  double? read(String key) {
+    final v = fields[key];
+    final d = v is num ? v.toDouble() : (v is String ? double.tryParse(v) : null);
+    return d != null && d.isFinite ? d : null;
+  }
+
+  final input = read('input_i'), truePeak = read('input_tp');
+  final range = read('input_lra'), threshold = read('input_thresh');
+  final offset = read('target_offset');
+  if (input == null ||
+      truePeak == null ||
+      range == null ||
+      threshold == null ||
+      offset == null) {
+    return null;
+  }
+  return Loudness(
+    input: input,
+    truePeak: truePeak,
+    range: range,
+    threshold: threshold,
+    offset: offset,
+  );
+}
+
+/// ffmpeg: the separated WAV as the final 128 kbps MP3, without tags. With [loudness]
+/// (from the first pass) the second pass applies the gain.
+List<String> encodeInstrumentalArgs(String wav, String out, {Loudness? loudness}) => [
+      '-y', '-i', wav,
+      if (loudness != null) ...['-af', _applyLoudness(loudness, mono: false)],
+      '-map_metadata', '-1',
+      '-c:a', 'libmp3lame', '-b:a', '128k', '-ar', '44100', '-ac', '2',
+      '-f', 'mp3', out,
+    ];
+
+/// ffmpeg: the separated vocals WAV as a small MP3 (64 kbps, 44.1 kHz, mono), without tags.
+List<String> encodeVocalsArgs(String wav, String out, {Loudness? loudness}) => [
+      '-y', '-i', wav,
+      if (loudness != null) ...['-af', _applyLoudness(loudness, mono: true)],
+      '-map_metadata', '-1',
+      '-c:a', 'libmp3lame', '-b:a', '64k', '-ar', '44100', '-ac', '1',
       '-f', 'mp3', out,
     ];
 
@@ -82,15 +191,21 @@ List<String> encodeInstrumentalArgs(String wav, String out) => [
 bool isMp3Codec(String probeStdout) => probeStdout.trim().toLowerCase() == 'mp3';
 
 /// The one WAV in [outDir] whose name contains "instrumental" (any case), or null if
-/// there is none or more than one (audio-separator was asked for a single stem, so
-/// two would be a surprise). Only files directly in the folder count.
-File? findInstrumental(Directory outDir) {
+/// there is none or more than one (audio-separator writes one file per stem, so two
+/// would be a surprise). Only files directly in the folder count.
+File? findInstrumental(Directory outDir) => _findStem(outDir, 'instrumental');
+
+/// The one WAV in [outDir] whose name contains "vocals" (any case), or null. Like
+/// [findInstrumental].
+File? findVocals(Directory outDir) => _findStem(outDir, 'vocals');
+
+File? _findStem(Directory outDir, String stem) {
   final matches = outDir
       .listSync(followLinks: false)
       .whereType<File>()
       .where((f) {
     final name = f.uri.pathSegments.last.toLowerCase();
-    return name.endsWith('.wav') && name.contains('instrumental');
+    return name.endsWith('.wav') && name.contains(stem);
   }).toList();
   return matches.length == 1 ? matches.single : null;
 }
@@ -213,8 +328,9 @@ class SeparationCancelled implements Exception {
   String toString() => 'Vocal removal was cancelled';
 }
 
-/// Vocal removal running in the background. [done] completes when work/instrumental.mp3
-/// exists, or fails with [SeparationCancelled] (after [cancel]), [ProcessFailure] or
+/// Vocal removal running in the background. [done] completes when work/vocals.mp3 and
+/// work/instrumental.mp3 exist (the vocals are moved into place first, so a song that has
+/// instrumental.mp3 also has vocals.mp3), or fails with [SeparationCancelled] (after [cancel]), [ProcessFailure] or
 /// StateError. Whatever the outcome, work/sep and the partial files are removed.
 class SeparationJob implements CancellableJob {
   SeparationJob._(this._t, this._work, this._onLine, this._killGrace) {
@@ -239,10 +355,12 @@ class SeparationJob implements CancellableJob {
     if (running != null) unawaited(_killTree(running, _killGrace));
   }
 
-  Future<void> _exec(String exe, List<String> args) async {
+  /// Runs a program. With [collect] its output lines are gathered there instead of
+  /// being passed to the progress line.
+  Future<void> _exec(String exe, List<String> args, {List<String>? collect}) async {
     if (_cancelled) throw const SeparationCancelled();
     try {
-      await runLogged(exe, args, onLine: _onLine, onStart: (proc) {
+      await runLogged(exe, args, onLine: collect?.add ?? _onLine, onStart: (proc) {
         _current = proc;
         // cancel() may have come while the program was starting.
         if (_cancelled) unawaited(_killTree(proc, _killGrace));
@@ -252,9 +370,19 @@ class SeparationJob implements CancellableJob {
     }
   }
 
+  /// The first pass of the normalization for [wav]; null when the stem is silent (or
+  /// ffmpeg's answer cannot be read), in which case it is encoded as it is.
+  Future<Loudness?> _measure(String wav, {required bool mono}) async {
+    final lines = <String>[];
+    await _exec(_t.ffmpeg, measureLoudnessArgs(wav, mono: mono), collect: lines);
+    final l = parseLoudness(lines.join('\n'));
+    return l == null || l.input < silenceFloorLufs ? null : l;
+  }
+
   Future<void> _run() async {
     final sep = Directory(p.join(_work.path, 'sep'));
     final partMp3 = p.join(_work.path, 'instrumental.part.mp3');
+    final partVocals = p.join(_work.path, 'vocals.part.mp3');
     try {
       // Must succeed: stems left from an earlier run would be picked up.
       await retryBusy(() async {
@@ -264,14 +392,32 @@ class SeparationJob implements CancellableJob {
       await _exec(_t.separator,
           separateArgs(p.join(_work.path, 'source.wav'), sep.path, _t.modelDir));
       final instrumental = findInstrumental(sep);
-      if (instrumental == null) {
-        throw StateError('audio-separator did not produce exactly one instrumental file');
+      final vocals = findVocals(sep);
+      if (instrumental == null || vocals == null) {
+        throw StateError(
+            'audio-separator did not produce exactly one instrumental and one vocals file');
       }
-      await _exec(_t.ffmpeg, encodeInstrumentalArgs(instrumental.path, partMp3));
+      final vocalsLoudness = await _measure(vocals.path, mono: true);
+      await _exec(
+        _t.ffmpeg,
+        encodeVocalsArgs(vocals.path, partVocals, loudness: vocalsLoudness),
+      );
+      if (_cancelled) throw const SeparationCancelled();
+      await retryBusy(() => File(partVocals).rename(p.join(_work.path, 'vocals.mp3')));
+      final instrumentalLoudness = await _measure(instrumental.path, mono: false);
+      await _exec(
+        _t.ffmpeg,
+        encodeInstrumentalArgs(
+          instrumental.path,
+          partMp3,
+          loudness: instrumentalLoudness,
+        ),
+      );
       if (_cancelled) throw const SeparationCancelled();
       await retryBusy(() => File(partMp3).rename(p.join(_work.path, 'instrumental.mp3')));
     } catch (_) {
       deleteQuietly(File(partMp3));
+      deleteQuietly(File(partVocals));
       // A killed program fails with a non-zero exit; that is the cancel, not an error.
       if (_cancelled) throw const SeparationCancelled();
       rethrow;

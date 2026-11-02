@@ -92,10 +92,29 @@ void main() {
     await pumpPanel(tester, (t, a) async => [first]);
     expect(
       find.text(
-        'Searching lrclib.net sends the title and artist; nothing else.',
+        'Searching lrclib.net (and lyrics.ovh when it finds nothing) sends the title and artist; nothing else.',
       ),
       findsOneWidget,
     );
+  });
+
+  testWidgets('tile_says_from_lyrics_ovh', (tester) async {
+    const ovh = LyricsCandidate(
+      title: 'Song Four',
+      artist: 'Artist Four',
+      album: '',
+      lyrics: 'x',
+      source: 'lyrics.ovh',
+    );
+    await pumpPanel(tester, (t, a) async => [ovh, second]);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('lyrics-result-0')),
+        matching: find.textContaining('from lyrics.ovh'),
+      ),
+      findsOneWidget,
+    );
+    expect(find.textContaining('from lyrics.ovh'), findsOneWidget);
   });
 
   testWidgets('picking_a_result_calls_back', (tester) async {
@@ -106,6 +125,27 @@ void main() {
   });
 
   // Ported from the dialog's shows_results_and_returns_the_pick.
+  testWidgets('tile_says_timed', (tester) async {
+    const timed = LyricsCandidate(
+      title: 'Song Three',
+      artist: 'Artist Three',
+      album: 'Album Three',
+      lyrics: 'x',
+      synced: [(1.0, 'x')],
+    );
+    await pumpPanel(tester, (t, a) async => [timed, second]);
+    final tile = find.byKey(const ValueKey('lyrics-result-0'));
+    expect(
+      find.descendant(of: tile, matching: find.textContaining('timed')),
+      findsOneWidget,
+    );
+    final plain = find.byKey(const ValueKey('lyrics-result-1'));
+    expect(
+      find.descendant(of: plain, matching: find.textContaining('timed')),
+      findsNothing,
+    );
+  });
+
   testWidgets('result_tiles_show_the_details', (tester) async {
     await pumpPanel(tester, (t, a) async => [first, second]);
     expect(find.text('Song One - Artist One'), findsOneWidget);

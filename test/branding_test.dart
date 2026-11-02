@@ -160,10 +160,13 @@ void main() {
     test('platform_names', () {
       final xcconfig = read('macos/Runner/Configs/AppInfo.xcconfig');
       expect(xcconfig, contains('PRODUCT_NAME = Kantahe Maker'));
-      expect(xcconfig, contains('PRODUCT_BUNDLE_IDENTIFIER = tech.loable.kantaheMaker'));
+      expect(xcconfig, contains('PRODUCT_BUNDLE_IDENTIFIER = party.kantahe.maker'));
+      expect(xcconfig, contains('kantahe.party. All rights reserved'));
 
       final rc = read('windows/runner/Runner.rc');
       expect(rc, contains('VALUE "ProductName", "Kantahe Maker"'));
+      expect(rc, contains('VALUE "CompanyName", "kantahe.party"'));
+      expect(rc, contains('Copyright (C) 2026 kantahe.party.'));
       expect(rc, contains('VALUE "FileDescription", "Kantahe Maker"'));
       expect(rc, contains('VALUE "OriginalFilename", "kantahe_maker.exe"'));
       expect(rc, contains('VALUE "InternalName", "kantahe_maker"'));
@@ -175,8 +178,25 @@ void main() {
       expect(cc, contains('gtk_window_set_icon_from_file'));
       final cmake = read('linux/CMakeLists.txt');
       expect(cmake, contains('set(BINARY_NAME "kantahe_maker")'));
-      expect(cmake, contains('set(APPLICATION_ID "tech.loable.kantahe_maker")'));
+      expect(cmake, contains('set(APPLICATION_ID "party.kantahe.maker")'));
       expect(read('pubspec.yaml'), contains('name: kantahe_maker'));
+    });
+
+    test('platform_files_no_longer_use_the_old_name', () {
+      for (final f in [
+        'macos/Runner/Configs/AppInfo.xcconfig',
+        'macos/Runner.xcodeproj/project.pbxproj',
+        'linux/CMakeLists.txt',
+        'windows/runner/Runner.rc',
+      ]) {
+        expect(read(f), isNot(contains('tech.loable')), reason: f);
+      }
+      expect(
+        'PRODUCT_BUNDLE_IDENTIFIER = party.kantahe.maker.RunnerTests;'
+            .allMatches(read('macos/Runner.xcodeproj/project.pbxproj'))
+            .length,
+        3,
+      );
     });
 
     test('readme_is_not_the_flutter_boilerplate', () {

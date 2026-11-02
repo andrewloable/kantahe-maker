@@ -34,6 +34,13 @@ class SongProject {
   /// The tap offset in seconds.
   double offset = 0;
 
+  /// Whether the export carries the vocals as NAME.vocals.mp3. Off for a new song.
+  bool includeVocals = false;
+
+  /// Where the tapped times came from: 'tapped' (by hand), 'lrclib' (the synced lyrics
+  /// of lrclib.net, untouched) or 'lrclib+tapped' (those, corrected by hand).
+  String timingSource = 'tapped';
+
   Map<String, dynamic> toJson() => {
     'id': id,
     'inputPath': inputPath,
@@ -46,6 +53,8 @@ class SongProject {
     'times': times,
     'wordTimes': wordTimes,
     'offset': offset,
+    'includeVocals': includeVocals,
+    'timingSource': timingSource,
   };
 
   /// Reads a project. Missing optional keys get their defaults and unknown keys are
@@ -112,6 +121,12 @@ class SongProject {
     }
     final offset = json['offset'];
     if (offset != null) p.offset = asDouble(offset, 'offset');
+    p.includeVocals = read('includeVocals', false);
+    final source = read('timingSource', 'tapped');
+    if (!const ['tapped', 'lrclib', 'lrclib+tapped'].contains(source)) {
+      throw FormatException('"timingSource" is not a known value', source);
+    }
+    p.timingSource = source;
     return p;
   }
 

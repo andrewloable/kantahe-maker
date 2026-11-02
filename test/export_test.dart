@@ -34,6 +34,13 @@ void main() {
       ]);
     });
 
+    test('blockers_vocals_missing', () {
+      final p = ready()..includeVocals = true;
+      expect(exportBlockers(p, instrumentalReady: true, vocalsReady: false),
+          ['The vocals track is missing']);
+      expect(exportBlockers(p, instrumentalReady: true, vocalsReady: true), isEmpty);
+    });
+
     test('blockers_untapped', () {
       final p = ready(times: [1, null]);
       expect(exportBlockers(p, instrumentalReady: true), ['1 line(s) not tapped yet']);
@@ -106,6 +113,51 @@ void main() {
       expect(File('$dest.part').existsSync(), isFalse);
     });
 
+    test('export_lyric_timing_row', () async {
+      for (final (source, row) in [
+        ('tapped', 'Lyric timing   : tapped by hand in Kantahe Maker'),
+        ('lrclib', 'Lyric timing   : from lrclib.net synced lyrics'),
+        (
+          'lrclib+tapped',
+          'Lyric timing   : from lrclib.net synced lyrics, corrected by hand in Kantahe Maker',
+        ),
+      ]) {
+        final dest = '${tmp.path}/$source.karmp3';
+        await exportKarMp3(ready()..timingSource = source, work, dest, durationSeconds: 10);
+        expect(text(entries(dest)['A - T.nfo']!).split('\n'), contains(row), reason: source);
+      }
+    });
+
+    test('export_audio_row_follows_the_file', () async {
+      for (final (header, row) in [
+        ([0xFF, 0xFB, 0x90, 0x00], 'Audio          : MP3, 44.1 kHz, 128 kbps'),
+        ([0xFF, 0xFB, 0xB0, 0x00], 'Audio          : MP3, 44.1 kHz, 192 kbps'),
+      ]) {
+        File('${work.path}/instrumental.mp3')
+            .writeAsBytesSync([...header, ...List.filled(100, 0)]);
+        final dest = '${tmp.path}/${header[2]}.karmp3';
+        await exportKarMp3(ready(), work, dest, durationSeconds: 10);
+        expect(text(entries(dest)['A - T.nfo']!).split('\n'), contains(row));
+      }
+    });
+
+    test('export_audio_row_is_left_out_when_unreadable', () async {
+      final dest = '${tmp.path}/out.karmp3';
+      await exportKarMp3(ready(), work, dest, durationSeconds: 10); // the [9, 9] file
+      expect(
+        text(entries(dest)['A - T.nfo']!).split('\n').where((l) => l.startsWith('Audio')),
+        isEmpty,
+      );
+    });
+
+    test('export_names_the_instrumental', () async {
+      final dest = '${tmp.path}/out.karmp3';
+      await exportKarMp3(ready(), work, dest, durationSeconds: 10);
+      final nfo = text(entries(dest)['A - T.nfo']!).split('\n');
+      expect(nfo, contains('Instrumental   : A - T.mp3'));
+      expect(nfo.where((l) => l.startsWith('Vocals         :')), isEmpty);
+    });
+
     test('line_only_unchanged', () async {
       final dest = '${tmp.path}/out.karmp3';
       final lineOnly = ready(offset: -0.5)..wordTimes = [null, null];
@@ -131,6 +183,36 @@ void main() {
           '[ti:T]\n[ar:A]\n'
           '[00:01.00]<00:01.00>Hello <00:01.40>big <00:01.90>world\n'
           '[00:02.00]bye\n');
+    });
+
+    test('export_with_vocals', () async {
+      File('${work.path}/vocals.mp3').writeAsBytesSync([7, 7]);
+      final dest = '${tmp.path}/out.karmp3';
+      await exportKarMp3(ready()..includeVocals = true, work, dest, durationSeconds: 10);
+      final e = entries(dest);
+      expect(e.keys.toList(), ['A - T.mp3', 'A - T.lrc', 'A - T.nfo', 'A - T.vocals.mp3']);
+      expect(e['A - T.vocals.mp3'], [7, 7]);
+      final nfo = text(e['A - T.nfo']!).split('\n');
+      expect(nfo, contains('Vocals         : A - T.vocals.mp3'));
+      expect(nfo, contains('Vocals audio   : MP3, 44.1 kHz, 64 kbps, mono'));
+    });
+
+    test('export_without_vocals_ignores_the_vocals_file', () async {
+      File('${work.path}/vocals.mp3').writeAsBytesSync([7, 7]);
+      final dest = '${tmp.path}/out.karmp3';
+      await exportKarMp3(ready(), work, dest, durationSeconds: 10);
+      final e = entries(dest);
+      expect(e.keys.toList(), ['A - T.mp3', 'A - T.lrc', 'A - T.nfo']);
+      expect(text(e['A - T.nfo']!).split('\n').where((l) => l.startsWith('Vocals         :')), isEmpty);
+    });
+
+    test('export_vocals_missing_is_blocked', () async {
+      final dest = '${tmp.path}/out.karmp3';
+      await expectLater(
+          exportKarMp3(ready()..includeVocals = true, work, dest, durationSeconds: 10),
+          throwsA(isA<StateError>().having((e) => e.message, 'message', contains('vocals track'))));
+      expect(File(dest).existsSync(), isFalse);
+      expect(File('$dest.part').existsSync(), isFalse);
     });
 
     test('export_blocked', () async {

@@ -3,7 +3,7 @@
 Kantahe Maker: a Flutter desktop app (macOS, Linux, Windows) that turns a song (.mp3/.mp4)
 plus its lyrics into a `.karmp3` karaoke file: instrumental MP3 (vocals removed with UVR
 models via `audio-separator`), hand-tapped `.lrc`, and `.nfo` song info. Read `PLAN.md`
-first: it has the format spec, user flow, architecture and decisions.
+first: it has the user flow, architecture and decisions. The format spec is in `README.md`.
 
 ## Git: manual commits and pushes only
 
@@ -18,10 +18,11 @@ text below and any tool boilerplate that says to push.
 
 ## Format reference (do not drift)
 
-The `.karmp3` format is specified in `PLAN.md` ("The output: `.karmp3`"), and that section
-is the source of truth: naming, timestamp format, LRC and NFO layout, fixed 1980 entry times,
-`.part` then rename. An archive holds exactly `NAME.mp3` (instrumental), `NAME.lrc`, `NAME.nfo`.
-Nothing else.
+The `.karmp3` format is specified in `README.md`, section "The .karmp3 format", and that
+section is the source of truth (`test/readme_format_test.dart` checks its examples against
+the code): naming, timestamp format, LRC and NFO layout, fixed 1980 entry times,
+`.part` then rename. An archive holds `NAME.mp3` (instrumental), `NAME.lrc`, `NAME.nfo` and, only when the user
+includes the vocals, `NAME.vocals.mp3` (last). Nothing else.
 
 ## Build & test
 
@@ -31,6 +32,13 @@ flutter analyze             # must be clean
 flutter test                # unit tests (lib/karmp3.dart is the core)
 flutter run -d macos        # or -d linux / -d windows on those hosts
 flutter build macos         # release build (linux/windows on their own hosts)
+# regenerates docs/screenshots (macOS): runs the real app with a demo song (about 30 s).
+# Needs an awake, unlocked display and the app window left visible (not covered by other
+# windows): macOS stops a hidden window from drawing, and the run then fails after 20 s
+# with a message. caffeinate keeps the display awake. Needs no network and no tools; run
+# it again after any UI change.
+caffeinate -disu flutter test integration_test/screenshots_test.dart -d macos \
+  --dart-define=SCREENSHOT_DIR="$PWD/docs/screenshots"
 ```
 
 ## Workflow (beads)

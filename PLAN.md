@@ -1,65 +1,23 @@
 # Kantahe Maker: plan
 
 Kantahe Maker is a Flutter desktop app for macOS, Linux and Windows. It turns a song
-(`.mp3` or `.mp4`) and its lyrics into a `.karmp3` karaoke file. The format is specified
-below, and this file is its source of truth.
+(`.mp3` or `.mp4`) and its lyrics into a `.karmp3` karaoke file. The app's domain is
+kantahe.party. The format is specified below, and this file is its source of truth.
 
 The work itself is tracked in beads (`bd ready`, `bd list`). This file explains how the
 pieces fit together.
 
 ## The output: `.karmp3`
 
-A `.karmp3` is a plain ZIP archive (deflate) holding three entries that share one base name:
-
-| Entry | Content |
-|---|---|
-| `NAME.mp3` | the **instrumental**: the song with its vocals removed |
-| `NAME.lrc` | timed lyrics: `[ti:]`, `[ar:]` and optional `[au:]` tags, then one `[mm:ss.xx]` line per lyric line (`<mm:ss.xx>` before each word when word timing exists) |
-| `NAME.nfo` | metadata as aligned `Key : value` lines. Empty values are left out |
-
-- `NAME` is `NNNNN - Artist - Title` when a songbook number is given, and `Artist - Title`
-  when it is not. Each part is cleaned the same way: the characters
-  `\ / : * ? " < > |` and control characters become spaces, whitespace runs are collapsed,
-  spaces and dots are trimmed from the ends, the result is cut to 80 characters, and an
-  empty result becomes `Unknown`.
-- Timestamps are `mm:ss.xx`: minutes padded to 2 digits, then seconds with two decimals
-  padded to 5 characters. The time is rounded to whole centiseconds first, so 59.996 s
-  becomes `01:00.00`. Negative times are clamped to 0.
-- LRC: `[ti:TITLE]` and `[ar:ARTIST]`, then `[au:COMPOSER]` if a composer is given. Then
-  one line per lyric line, either `[t]text` (line timing) or `[t]<t1>word<t2>word…` (word
-  timing, where `[t]` equals the first word's time).
-- NFO rows appear in this order: `Title`, `Artist`, `Song number`, `Composer`, `Lyricist`,
-  `Duration` (m:ss), `Audio`, `Vocals removed` (the model name), `Lyrics` ("timed (.lrc,
-  N lines)"), `Lyric timing` ("tapped by hand in Kantahe Maker"). Keys are padded to the
-  longest key among all rows (`Vocals removed`, 14 characters) and written as
-  `Key : value`. Rows with an empty value are left out.
-- Every ZIP entry's modified time is fixed at 1980-01-01 00:00 and the `.nfo` holds no date,
-  so the same input always produces the same archive contents.
-- The archive is written to `PATH.part` first and renamed into place at the end, so a file
-  with the final name is always complete.
-- No other entries go in the archive (no video, no original audio).
-
-Rules a reader relies on:
-
-- LRC tag lines match `^\[([A-Za-z]+):(.*)\]$`.
-- Each lyric line starts with `[mm:ss.xx]`. With word timing, each word follows its own
-  `<mm:ss.xx>` mark. Without word timing, the whole line counts as one word at the line's
-  time.
-- `.nfo` lines match `^(.+?)\s+:\s(.*)$`.
-- A reader finds the entries by extension (`.mp3`, `.lrc`, `.nfo`), not by name.
-
-Example `.lrc` (line timing):
-
-```
-[ti:Song Title]
-[ar:Artist]
-[00:07.31]First lyric line
-[00:11.34]Second lyric line
-```
+The `.karmp3` format is specified in `README.md`, section "The .karmp3 format", and that
+section is the source of truth: the entries and their order, how `NAME` is built, the `.lrc`
+and `.nfo` layouts, the fixed 1980 entry times, the `.part` then rename rule, and how a
+reader and a writer should behave. A test (`test/readme_format_test.dart`) keeps its
+examples and its list of `.nfo` rows in step with the code. Change the format there first.
 
 ## User flow
 
-**New song** on Home picks an `.mp3` or `.mp4` (anything ffmpeg can read also works). The song
+**New song** on Home picks an `.mp3` or `.mp4` (the file picker also offers .m4a, .mkv, .webm, .wav and .flac). The song
 then opens as a wizard that shows one step at a time: a step header (tap a step to go there),
 Back, and Next. Next and the header only open a step once every step before it is done;
 Remove vocals does not hold up the later steps while it runs. A reopened song opens on its
@@ -69,21 +27,36 @@ first unfinished step.
    already MP3) and `source.wav` (44.1 kHz stereo, used for separation).
 2. **Remove vocals**: runs in the background, so the user may go on to the next steps; a status
    line on them says how it is going. `audio-separator` (UVR models) turns `source.wav` into an
-   instrumental WAV, and ffmpeg encodes that as `instrumental.mp3` (libmp3lame, 192 kbps,
-   44.1 kHz). Only Export waits for it.
+   instrumental WAV and a vocals WAV in one run. ffmpeg encodes the vocals as `vocals.mp3`
+   (libmp3lame, 64 kbps, 44.1 kHz, mono) and then the instrumental as `instrumental.mp3`
+   (libmp3lame, 128 kbps, 44.1 kHz stereo). Each stem is first measured and then brought to
+   about -16 LUFS (two passes of ffmpeg `loudnorm`; a silent stem is left as it is), so the
+   vocals end up as loud as the instrumental. Only Export waits for it.
 3. **Details**: title, artist, and optionally songbook number, composer and lyricist. A blank
    title or artist is filled from the file's tags (ffprobe) once the audio is read; typed
-   values are never replaced.
+   values are never replaced. The step also searches musicbrainz.org by itself when it opens
+   (the typed title and artist, or what the file name suggests, as in "Artist - Title.mp3")
+   and lists matches with album, year and length. Picking one sets the title and artist and
+   fills composer and lyricist where they are blank (a work's "writer" counts as both). Only
+   the title and artist (or the file name) are sent, and the step says so.
 4. **Lyrics**: searched on lrclib.net automatically when the step opens with an empty lyrics box
-   (once per title and artist). Only the title and artist are sent, and the step says so.
-   Pick a result or paste the lyrics, one line per lyric line. Blank lines are dropped.
+   (once per title and artist). When lrclib.net finds nothing, lyrics.ovh is asked (plain
+   lyrics only). Only the title and artist are sent, and the step says so. Pick a result or
+   paste the lyrics, one line per lyric line. Blank lines are dropped. A result marked
+   "timed" has line times: picking it pre-times the lines.
 5. **Timing**: `source.mp3` plays with the vocals in, which makes the lines easier to hear.
    Space stamps the next line, Backspace undoes the last stamp, ←/→ seek 2 s, and playback
    speed can be 0.5×, 0.75× or 1×. A tap offset setting (−0.50 to +0.50 s, default 0)
    corrects for reaction time. A preview mode plays the instrumental with the current line
-   highlighted. A status line says how many lines are tapped.
-6. **Export**: shows the file name and any unfinished step with a button to go there; then a
-   save dialog, and the `.karmp3` is written. Afterwards: Show in folder, or Back to songs.
+   highlighted. A status line says how many lines are tapped. Times that came with the
+   lyrics from lrclib.net are marked as such until the user corrects them by tapping, and the
+   `.nfo` says where the timing came from.
+6. **Export**: shows the file name and any unfinished step with a button to go there. The
+   "Include the vocals" box (off by default, saved per song) adds `NAME.vocals.mp3`, so a
+   player can turn the vocals on and off. A song whose vocals were removed by version 1.0.x
+   has no `vocals.mp3`; with the box ticked, the step says so and offers "Run vocal removal
+   again" first. Then a save dialog, and the `.karmp3` is written. Afterwards: Show in
+   folder, or Back to songs.
 
 Each song's work lives in a project folder that is saved as you go, so closing the app does
 not lose the tapping.
@@ -141,8 +114,11 @@ lib/
   project.dart           SongProject + project.json persistence
   export.dart            exportBlockers, timingBlockers, exportKarMp3
   wizard.dart            the song wizard's steps: done, can enter, opening step (pure Dart)
-  lyrics_lookup.dart     lrclib.net search (title and artist only)
-  screens/               home, song (the wizard), tap, lyrics_search_panel, settings, tools_dialog
+  lyrics_lookup.dart     lrclib.net search (synced lyrics too) and the lyrics.ovh fallback
+  song_info.dart         musicbrainz.org search: title, artist, album, year, composer, lyricist
+  web_get.dart           one HTTP GET with timeout, size limit and the app's User-Agent
+  screens/               home, song (the wizard), tap, lyrics_search_panel, song_info_panel,
+                         settings, tools_dialog
 test/                    one *_test.dart per lib file; pure logic first, widget tests with injected seams
 ```
 
@@ -159,7 +135,8 @@ test/                    one *_test.dart per lib file; pure logic first, widget 
 - **The macOS App Sandbox is turned off.** The app runs binaries it downloaded, and the
   sandbox would block them. This is acceptable because the app is not headed for the Mac
   App Store.
-- **Instrumental bitrate is fixed at 192 kbps.** A setting can be added if someone asks for one.
+- **Instrumental bitrate is fixed at 128 kbps** (it was 192 kbps up to version 1.0.x; the `.nfo`
+  Audio row says what a file really has). A setting can be added if someone asks for one.
 
 ## How the work is run
 

@@ -20,13 +20,66 @@ class LyricsLookupException implements Exception {
 class LyricsCandidate {
   final String title, artist, album, lyrics;
   final double? seconds;
+
+  /// The lines with their times when LRCLIB has synced lyrics (see
+  /// [parseSyncedLyrics]); empty otherwise.
+  final List<(double, String)> synced;
+
+  /// The service the lyrics came from.
+  final String source;
   const LyricsCandidate({
     required this.title,
     required this.artist,
     required this.album,
     required this.lyrics,
     this.seconds,
+    this.synced = const [],
+    this.source = lyricsHost,
   });
+}
+
+/// lyrics.ovh, a free lyrics service, searched when LRCLIB finds nothing.
+const lyricsOvhHost = 'api.lyrics.ovh';
+
+/// The lyrics.ovh address for [artist] and [title]: both are path parts.
+Uri lyricsOvhUri(String artist, String title, {Uri? base}) {
+  final root = base ?? Uri.https(lyricsOvhHost, '/v1');
+  return root.replace(
+    pathSegments: [...root.pathSegments, oneLine(artist), oneLine(title)],
+  );
+}
+
+/// The lyrics in a lyrics.ovh answer, or null when there are none.
+String? parseLyricsOvh(String body) {
+  final Object? json;
+  try {
+    json = jsonDecode(body);
+  } on FormatException {
+    return null;
+  }
+  final lyrics = json is Map ? json['lyrics'] : null;
+  if (lyrics is! String) return null;
+  final text = lyrics.replaceAll('\r\n', '\n').replaceAll('\r', '\n').trim();
+  return text.isEmpty ? null : text;
+}
+
+/// The timed lines in LRCLIB's syncedLyrics ("[mm:ss.xx]text" per line). Marks like
+/// "<mm:ss.xx>" inside a line are removed; lines without a time or without text are
+/// skipped. Empty when the times are not in order (the lyrics are not usable as timing).
+List<(double, String)> parseSyncedLyrics(String lrc) {
+  final line = RegExp(r'^\[(\d+):(\d{2})(?:[.:](\d{1,3}))?\](.*)$');
+  final out = <(double, String)>[];
+  for (final raw in lrc.split('\n')) {
+    final m = line.firstMatch(raw.trim());
+    if (m == null) continue;
+    final text = m.group(4)!.replaceAll(RegExp(r'<\d+:\d{2}(?:[.:]\d{1,3})?>'), '').trim();
+    if (text.isEmpty) continue;
+    final fraction = m.group(3) == null ? 0.0 : double.parse('0.${m.group(3)}');
+    final seconds = int.parse(m.group(1)!) * 60 + int.parse(m.group(2)!) + fraction;
+    if (out.isNotEmpty && seconds < out.last.$1) return const [];
+    out.add((seconds, text));
+  }
+  return out;
 }
 
 /// The LRCLIB search address for [title] and [artist]. Spaces are written as %20 and
@@ -71,6 +124,7 @@ List<LyricsCandidate> parseLyricsSearch(String body) {
     final lyrics = plain.replaceAll('\r\n', '\n').replaceAll('\r', '\n').trim();
     if (lyrics.isEmpty) continue;
     final duration = e['duration'];
+    final synced = e['syncedLyrics'];
     out.add(
       LyricsCandidate(
         title: str(e['trackName']).isNotEmpty
@@ -80,6 +134,7 @@ List<LyricsCandidate> parseLyricsSearch(String body) {
         album: str(e['albumName']),
         lyrics: lyrics,
         seconds: duration is num ? duration.toDouble() : null,
+        synced: synced is String ? parseSyncedLyrics(synced) : const [],
       ),
     );
   }
@@ -113,18 +168,21 @@ Future<List<LyricsCandidate>> findLyrics(
   String title,
   String artist, {
   Uri? base,
+  Uri? ovhBase,
   Duration timeout = const Duration(seconds: 15),
   int maxBytes = 8 * 1024 * 1024,
 }) async {
   final client = HttpClient()..connectionTimeout = timeout;
   try {
-    return await _search(
+    final found = await _search(
       client,
       title,
       artist,
       base,
       maxBytes,
     ).timeout(timeout);
+    if (found.isNotEmpty || oneLine(artist).isEmpty) return found;
+    return await _ovh(client, title, artist, ovhBase, maxBytes, timeout);
   } on TimeoutException {
     throw const LyricsLookupException(
       'The lyrics server did not answer in time',
@@ -136,6 +194,53 @@ Future<List<LyricsCandidate>> findLyrics(
   } finally {
     client.close(force: true);
   }
+}
+
+/// The second source, asked when LRCLIB found nothing. Whatever goes wrong here counts as
+/// "nothing found": lyrics.ovh is a bonus, not a reason to show an error.
+Future<List<LyricsCandidate>> _ovh(
+  HttpClient client,
+  String title,
+  String artist,
+  Uri? base,
+  int maxBytes,
+  Duration timeout,
+) async {
+  try {
+    return await () async {
+      final request = await client.getUrl(lyricsOvhUri(artist, title, base: base));
+      request.headers
+        ..set(HttpHeaders.userAgentHeader, 'KantaheMaker/1.0')
+        ..set(HttpHeaders.acceptHeader, 'application/json');
+      final response = await request.close();
+      final body = await _readBody(response, maxBytes);
+      if (response.statusCode != 200) return const <LyricsCandidate>[];
+      final lyrics = parseLyricsOvh(body);
+      if (lyrics == null) return const <LyricsCandidate>[];
+      return [
+        LyricsCandidate(
+          title: oneLine(title),
+          artist: oneLine(artist),
+          album: '',
+          lyrics: lyrics,
+          source: 'lyrics.ovh',
+        ),
+      ];
+    }().timeout(timeout);
+  } catch (_) {
+    return const [];
+  }
+}
+
+Future<String> _readBody(HttpClientResponse response, int maxBytes) async {
+  final bytes = BytesBuilder(copy: false);
+  await for (final chunk in response) {
+    bytes.add(chunk);
+    if (bytes.length > maxBytes) {
+      throw const LyricsLookupException('The lyrics server sent too much data');
+    }
+  }
+  return utf8.decode(bytes.takeBytes(), allowMalformed: true);
 }
 
 Future<List<LyricsCandidate>> _search(
@@ -152,14 +257,7 @@ Future<List<LyricsCandidate>> _search(
     ..set(HttpHeaders.userAgentHeader, 'KantaheMaker/1.0')
     ..set(HttpHeaders.acceptHeader, 'application/json');
   final response = await request.close();
-  final bytes = BytesBuilder(copy: false);
-  await for (final chunk in response) {
-    bytes.add(chunk);
-    if (bytes.length > maxBytes) {
-      throw const LyricsLookupException('The lyrics server sent too much data');
-    }
-  }
-  final body = utf8.decode(bytes.takeBytes(), allowMalformed: true);
+  final body = await _readBody(response, maxBytes);
   if (response.statusCode == 200) {
     return rankLyrics(parseLyricsSearch(body), title, artist).take(10).toList();
   }

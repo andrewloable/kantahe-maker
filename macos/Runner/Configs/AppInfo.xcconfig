@@ -8,7 +8,7 @@
 PRODUCT_NAME = Kantahe Maker
 
 // The application's bundle identifier
-PRODUCT_BUNDLE_IDENTIFIER = tech.loable.kantaheMaker
+PRODUCT_BUNDLE_IDENTIFIER = party.kantahe.maker
 
 // The copyright displayed in application information
-PRODUCT_COPYRIGHT = Copyright © 2026 tech.loable. All rights reserved.
+PRODUCT_COPYRIGHT = Copyright © 2026 kantahe.party. All rights reserved.

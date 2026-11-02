@@ -33,13 +33,10 @@ const pythonVersion = '3.12';
 const audioSeparatorVersion = '0.47.1';
 
 /// The vocal-removal model, fetched by audio-separator itself on first use
-/// (64 MB, from github.com/TRvlvr/model_repo).
+/// (64 MB, from github.com/TRvlvr/model_repo). One run writes both stems, named
+/// "INPUT_(Instrumental)_UVR-MDX-NET-Inst_HQ_3.wav" and "INPUT_(Vocals)_...wav"
+/// (checked 2026-11-02).
 const separatorModel = 'UVR-MDX-NET-Inst_HQ_3.onnx';
-
-/// Value for audio-separator's --single_stem that gives only the instrumental
-/// ("Instrumental" and "instrumental" both work in 0.47.1; this is the documented form).
-/// The output is named "INPUT_(Instrumental)_UVR-MDX-NET-Inst_HQ_3.wav".
-const singleStemInstrumental = 'Instrumental';
 
 /// Extra packages that must be installed with audio-separator (uv's --with).
 /// audio-separator 0.47.1 imports "audioread" but does not declare it, so the CLI

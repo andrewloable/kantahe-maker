@@ -82,6 +82,8 @@ class _LyricsSearchPanelState extends State<LyricsSearchPanel> {
     final detail = [
       if (c.album.isNotEmpty) c.album,
       if (c.seconds != null) _clock(c.seconds!),
+      if (c.synced.isNotEmpty) 'timed',
+      if (c.source != lyricsHost) 'from ${c.source}',
     ].join(' · ');
     final firstLine = c.lyrics.split('\n').first;
     return ListTile(
@@ -114,7 +116,7 @@ class _LyricsSearchPanelState extends State<LyricsSearchPanel> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Searching lrclib.net sends the title and artist; nothing else.',
+          'Searching lrclib.net (and lyrics.ovh when it finds nothing) sends the title and artist; nothing else.',
           style: Theme.of(context).textTheme.bodySmall,
         ),
         const SizedBox(height: 8),

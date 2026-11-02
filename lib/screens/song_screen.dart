@@ -13,10 +13,12 @@ import '../karmp3.dart' show karMp3Name;
 import '../lyrics_lookup.dart';
 import '../pipeline.dart';
 import '../project.dart';
+import '../song_info.dart';
 import '../tools.dart';
 import '../wizard.dart';
 import 'tap_screen.dart';
 import 'lyrics_search_panel.dart';
+import 'song_info_panel.dart';
 import 'tools_dialog.dart';
 
 /// The command that shows [path] in the system file manager (a program and its
@@ -57,6 +59,8 @@ class SongScreen extends StatefulWidget {
     this.revealFile,
     this.createPlayer,
     this.lyricsFinder,
+    this.songInfoFinder,
+    this.songInfoDetailsFn,
     this.tagsFn,
     this.saveDelay = const Duration(milliseconds: 500),
   });
@@ -87,6 +91,15 @@ class SongScreen extends StatefulWidget {
   /// Looks lyrics up; null means LRCLIB.
   final LyricsFinder? lyricsFinder;
 
+  /// Looks song info up; null means MusicBrainz.
+  final SongInfoFinder? songInfoFinder;
+
+  /// The composer and lyricist of a found recording; null means MusicBrainz.
+  final Future<({String composer, String lyricist})> Function(
+    String recordingId,
+  )?
+  songInfoDetailsFn;
+
   /// Reads the title and artist from the input's tags; null means [readTags].
   final Future<({String title, String artist})> Function(
     ToolPaths tools,
@@ -114,6 +127,9 @@ class _SongScreenState extends State<SongScreen> {
   String _lastLine = '';
   bool _hasSource = false;
   bool _hasInstrumental = false;
+
+  /// work/vocals.mp3 exists. Songs separated by version 1.0.x do not have it.
+  bool _hasVocals = false;
   ToolPaths? _tools;
   CancellableJob? _job;
   bool _exporting = false;
@@ -125,6 +141,12 @@ class _SongScreenState extends State<SongScreen> {
   /// The title and artist of the last automatic lyrics search, so coming back to the
   /// Lyrics step does not search the same thing again.
   String? _lastAutoSearch;
+
+  /// The same for the song info search on the Details step.
+  String? _lastInfoSearch;
+
+  /// The recording whose composer and lyricist are being fetched after a pick.
+  String? _loadingInfoId;
 
   String _file(String name) => p.join(widget.dir.path, name);
 
@@ -163,6 +185,7 @@ class _SongScreenState extends State<SongScreen> {
         File(_file('source.mp3')).existsSync() &&
         File(_file('source.wav')).existsSync();
     _hasInstrumental = File(_file('instrumental.mp3')).existsSync();
+    _hasVocals = File(_file('vocals.mp3')).existsSync();
     for (final entry in {
       'lyrics': project.lyrics,
       'title': project.title,
@@ -249,14 +272,30 @@ class _SongScreenState extends State<SongScreen> {
     try {
       await job.done;
       _hasInstrumental = true;
+      _hasVocals = File(_file('vocals.mp3')).existsSync();
       _setStage(_Stage.ready);
     } on SeparationCancelled {
+      _restoreFlagsFromDisk();
       _setStage(_Stage.cancelled);
     } catch (e) {
+      _restoreFlagsFromDisk();
       _setStage(_Stage.separationFailed, error: '$e');
     } finally {
       if (identical(_job, job)) _job = null;
     }
+  }
+
+  /// After a vocal removal that did not finish: an instrumental made earlier (when the
+  /// removal was run again) still counts.
+  void _restoreFlagsFromDisk() {
+    _hasInstrumental = File(_file('instrumental.mp3')).existsSync();
+    _hasVocals = File(_file('vocals.mp3')).existsSync();
+  }
+
+  /// For a song made by an older version, which has no vocals.mp3.
+  void _runVocalRemovalAgain() {
+    setState(() => _hasInstrumental = false);
+    unawaited(_runAudio());
   }
 
   /// Fills a blank title or artist from the file's tags. A typed value is never
@@ -561,8 +600,80 @@ class _SongScreenState extends State<SongScreen> {
       );
       if (replace != true || !mounted) return;
     }
-    _controllers['lyrics']!.text = picked.lyrics;
-    _edited((p0) => p0.setLyrics(picked.lyrics));
+    if (picked.synced.isEmpty) {
+      _controllers['lyrics']!.text = picked.lyrics;
+      _edited((p0) {
+        p0.setLyrics(picked.lyrics);
+        p0.timingSource = 'tapped';
+      });
+      return;
+    }
+    // Lyrics with times: the lines come from the timed version, and so do the times.
+    final text = picked.synced.map((l) => l.$2).join('\n');
+    _controllers['lyrics']!.text = text;
+    _edited((p0) {
+      p0.setLyrics(text);
+      p0.times = [for (final l in picked.synced) l.$1];
+      p0.wordTimes = List.filled(picked.synced.length, null);
+      p0.timingSource = 'lrclib';
+    });
+  }
+
+  /// What the song info search asks for: the typed title and artist, or what the file
+  /// name suggests while there is no title yet.
+  ({String title, String artist}) _infoQuery(SongProject project) =>
+      oneLine(project.title).isNotEmpty
+      ? (title: project.title, artist: project.artist)
+      : queryFromFileName(project.inputPath);
+
+  Widget _infoPanel(SongProject project) {
+    final query = _infoQuery(project);
+    // Searches by itself once per query, as the Lyrics step does.
+    final key = '${oneLine(query.title)}|${oneLine(query.artist)}';
+    final autoSearch = key != _lastInfoSearch;
+    if (autoSearch) _lastInfoSearch = key;
+    return SongInfoPanel(
+      title: query.title,
+      artist: query.artist,
+      finder: widget.songInfoFinder ?? findSongInfo,
+      onPicked: (picked) => unawaited(_pickSongInfo(picked)),
+      autoSearch: autoSearch,
+      loadingId: _loadingInfoId,
+    );
+  }
+
+  /// Takes the title and artist of the match the user picked, then the composer and
+  /// lyricist where those fields are blank. Without the second part (a failed lookup)
+  /// the title and artist still stay.
+  Future<void> _pickSongInfo(SongInfoCandidate picked) async {
+    _controllers['title']!.text = picked.title;
+    _controllers['artist']!.text = picked.artist;
+    _edited((p0) {
+      p0.title = picked.title;
+      p0.artist = picked.artist;
+    });
+    setState(() => _loadingInfoId = picked.recordingId);
+    try {
+      final credits = await (widget.songInfoDetailsFn ?? songInfoDetails)(
+        picked.recordingId,
+      );
+      if (!mounted) return;
+      final project = _project!;
+      final composer =
+          oneLine(project.composer).isEmpty && credits.composer.isNotEmpty;
+      final lyricist =
+          oneLine(project.lyricist).isEmpty && credits.lyricist.isNotEmpty;
+      if (composer) _controllers['composer']!.text = credits.composer;
+      if (lyricist) _controllers['lyricist']!.text = credits.lyricist;
+      _edited((p0) {
+        if (composer) p0.composer = credits.composer;
+        if (lyricist) p0.lyricist = credits.lyricist;
+      });
+    } catch (e) {
+      _showMessage('Could not get the composer and lyricist: $e');
+    } finally {
+      if (mounted) setState(() => _loadingInfoId = null);
+    }
   }
 
   Widget _lyricsStep(SongProject project) {
@@ -612,6 +723,11 @@ class _SongScreenState extends State<SongScreen> {
               : blockers.first,
           key: const ValueKey('timing-status'),
         ),
+        if (project.timingSource.startsWith('lrclib'))
+          const Text(
+            'These times came with the lyrics from lrclib.net. Play the song and tap again where a line is off.',
+            key: ValueKey('timing-from-lrclib'),
+          ),
         const SizedBox(height: 8),
         Expanded(child: _tapScreen(project)),
       ],
@@ -640,6 +756,9 @@ class _SongScreenState extends State<SongScreen> {
         setState(() {
           project.times = List.of(times);
           project.offset = offset;
+          if (project.timingSource == 'lrclib') {
+            project.timingSource = 'lrclib+tapped';
+          }
         });
         _saveNow();
       },
@@ -650,7 +769,14 @@ class _SongScreenState extends State<SongScreen> {
     final ready = exportBlockers(
       project,
       instrumentalReady: _hasInstrumental,
+      vocalsReady: _hasVocals,
     ).isEmpty;
+    // The box is ticked but this song has no vocals file: say why, and offer a fix.
+    final needsRerun =
+        project.includeVocals &&
+        !_hasVocals &&
+        _hasInstrumental &&
+        _stage != _Stage.separating;
     final exported = _exportedPath;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -679,6 +805,34 @@ class _SongScreenState extends State<SongScreen> {
                 ),
               ],
             ),
+        const SizedBox(height: 8),
+        CheckboxListTile(
+          key: const ValueKey('export-vocals'),
+          contentPadding: EdgeInsets.zero,
+          controlAffinity: ListTileControlAffinity.leading,
+          value: project.includeVocals,
+          onChanged: (value) =>
+              _edited((p0) => p0.includeVocals = value ?? false),
+          title: const Text('Include the vocals'),
+          subtitle: const Text(
+            'A separate, smaller MP3 (64 kbps mono) so a player can turn the vocals on and off.',
+          ),
+        ),
+        if (needsRerun) ...[
+          const Text(
+            "This song's vocals were not kept: its vocal removal ran in an older version. Run it again to include them.",
+            key: ValueKey('vocals-missing'),
+          ),
+          const SizedBox(height: 8),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: OutlinedButton(
+              key: const ValueKey('vocals-rerun'),
+              onPressed: _runVocalRemovalAgain,
+              child: const Text('Run vocal removal again'),
+            ),
+          ),
+        ],
         const SizedBox(height: 8),
         FilledButton(
           onPressed: ready && !_exporting ? _export : null,
@@ -807,6 +961,8 @@ class _SongScreenState extends State<SongScreen> {
         return scroll([_audio()]);
       case WizardStep.details:
         return scroll([
+          _infoPanel(project),
+          const SizedBox(height: 16),
           _field('title', 'Title (required)', (p0, t) => p0.title = t),
           _field('artist', 'Artist (required)', (p0, t) => p0.artist = t),
           _field(

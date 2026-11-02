@@ -53,6 +53,68 @@ void main() {
       expect(p.times, isEmpty);
       expect(p.offset, 0);
       expect(p.number, isNull);
+      expect(p.includeVocals, isFalse);
+    });
+
+    test('include_vocals_round_trips', () {
+      final p = full()..includeVocals = true;
+      final back = SongProject.fromJson(
+        jsonDecode(jsonEncode(p.toJson())) as Map<String, dynamic>,
+      );
+      expect(back.includeVocals, isTrue);
+      expect(
+        SongProject.fromJson(
+          jsonDecode(jsonEncode(full().toJson())) as Map<String, dynamic>,
+        ).includeVocals,
+        isFalse,
+      );
+    });
+
+    test('include_vocals_is_off_in_old_files', () {
+      // A project.json written by 1.0.x has no such key.
+      final old = full().toJson()..remove('includeVocals');
+      expect(SongProject.fromJson(old).includeVocals, isFalse);
+    });
+
+    test('timing_source_round_trips', () {
+      for (final source in ['tapped', 'lrclib', 'lrclib+tapped']) {
+        final p = full()..timingSource = source;
+        final back = SongProject.fromJson(
+          jsonDecode(jsonEncode(p.toJson())) as Map<String, dynamic>,
+        );
+        expect(back.timingSource, source);
+      }
+    });
+
+    test('timing_source_defaults_to_tapped', () {
+      // A project.json written by 1.0.x has no such key.
+      final old = full().toJson()..remove('timingSource');
+      expect(SongProject.fromJson(old).timingSource, 'tapped');
+    });
+
+    test('timing_source_wrong_value_throws', () {
+      for (final bad in ['pasted', 5]) {
+        expect(
+          () => SongProject.fromJson({
+            'id': 'x',
+            'inputPath': 'a',
+            'timingSource': bad,
+          }),
+          throwsFormatException,
+          reason: '$bad',
+        );
+      }
+    });
+
+    test('include_vocals_wrong_type', () {
+      expect(
+        () => SongProject.fromJson({
+          'id': 'x',
+          'inputPath': 'a',
+          'includeVocals': 'yes',
+        }),
+        throwsFormatException,
+      );
     });
 
     test('json_missing_required', () {

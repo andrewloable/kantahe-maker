@@ -77,6 +77,10 @@ String buildLrc({
 /// The song info stored as NAME.nfo: aligned "Key : value" lines.
 class Nfo {
   final String title, artist, composer, lyricist, audio, separator, lyricTiming;
+
+  /// The entry names of the instrumental and of the vocals ([vocals] and [vocalsAudio]
+  /// are empty when the vocals are not in the file).
+  final String instrumental, vocals, vocalsAudio;
   final int? number;
   final int seconds, lyricLines;
 
@@ -89,6 +93,9 @@ class Nfo {
     required this.seconds,
     required this.audio,
     required this.separator,
+    required this.instrumental,
+    this.vocals = '',
+    this.vocalsAudio = '',
     required this.lyricLines,
     this.lyricTiming = 'tapped by hand in Kantahe Maker',
   });
@@ -106,6 +113,9 @@ class Nfo {
       ('Duration', '${seconds ~/ 60}:${(seconds % 60).toString().padLeft(2, '0')}'),
       ('Audio', audio),
       ('Vocals removed', separator),
+      ('Instrumental', instrumental),
+      ('Vocals', vocals),
+      ('Vocals audio', vocalsAudio),
       ('Lyrics', 'timed (.lrc, $lyricLines lines)'),
       ('Lyric timing', lyricTiming),
     ];
@@ -118,8 +128,9 @@ class Nfo {
   }
 }
 
-/// Writes the archive: NAME.mp3, NAME.lrc, NAME.nfo, in that order, deflated, every
-/// entry dated 1980-01-01 00:00 so the same input gives the same bytes. It goes to
+/// Writes the archive: NAME.mp3, NAME.lrc, NAME.nfo and, when [vocals] is given,
+/// NAME.vocals.mp3 (last), in that order, deflated, every entry dated 1980-01-01 00:00
+/// so the same input gives the same bytes. It goes to
 /// "$path.part" first and is renamed at the end, so a file with the final name is
 /// always complete. On any error the .part file is removed and the error rethrown.
 Future<void> writeKarMp3(
@@ -128,6 +139,7 @@ Future<void> writeKarMp3(
   required Uint8List mp3,
   required String lrc,
   required String nfo,
+  Uint8List? vocals,
 }) async {
   final part = File('$path.part');
   try {
@@ -135,6 +147,9 @@ Future<void> writeKarMp3(
       ..addFile(ArchiveFile.bytes('$name.mp3', mp3))
       ..addFile(ArchiveFile.bytes('$name.lrc', utf8.encode(lrc)))
       ..addFile(ArchiveFile.bytes('$name.nfo', utf8.encode(nfo)));
+    if (vocals != null) {
+      archive.addFile(ArchiveFile.bytes('$name.vocals.mp3', vocals));
+    }
     // `modified` is the archive-wide DOS time and overrides each entry's own time.
     // DateTime(1980) is local calendar fields, so it does not depend on the timezone.
     final bytes = ZipEncoder().encodeBytes(

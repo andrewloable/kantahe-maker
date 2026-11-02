@@ -4,6 +4,7 @@
 import 'dart:io';
 
 import 'karmp3.dart';
+import 'mp3_info.dart';
 import 'project.dart';
 import 'tap_session.dart';
 import 'tool_pins.dart';
@@ -15,10 +16,15 @@ String oneLine(String s) =>
     s.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).join(' ');
 
 /// What stops the export, in the order the user should fix it; empty means ready.
-List<String> exportBlockers(SongProject p, {required bool instrumentalReady}) {
+List<String> exportBlockers(
+  SongProject p, {
+  required bool instrumentalReady,
+  bool vocalsReady = false,
+}) {
   final lines = p.lyricLines();
   return [
     if (!instrumentalReady) 'Vocal removal is not finished',
+    if (p.includeVocals && !vocalsReady) 'The vocals track is missing',
     if (lines.isEmpty) 'Add lyrics' else ...timingBlockers(p),
     if (oneLine(p.title).isEmpty) 'Title is required',
     if (oneLine(p.artist).isEmpty) 'Artist is required',
@@ -54,8 +60,18 @@ Future<void> exportKarMp3(
   required double durationSeconds,
 }) async {
   final mp3 = File('${work.path}/instrumental.mp3');
-  final blockers = exportBlockers(p, instrumentalReady: mp3.existsSync());
+  final vocals = File('${work.path}/vocals.mp3');
+  final blockers = exportBlockers(
+    p,
+    instrumentalReady: mp3.existsSync(),
+    vocalsReady: vocals.existsSync(),
+  );
   if (blockers.isNotEmpty) throw StateError(blockers.join('; '));
+
+  // What the file says about itself, so the .nfo is right for songs made by older versions
+  // too (their instrumental has another bitrate). Left out when it cannot be read.
+  final instrumentalBytes = await mp3.readAsBytes();
+  final instrumentalInfo = readMp3Info(instrumentalBytes);
 
   final lines = p.lyricLines();
   final session = TapSession(
@@ -66,6 +82,7 @@ Future<void> exportKarMp3(
   );
   final title = oneLine(p.title), artist = oneLine(p.artist);
   final composer = oneLine(p.composer), lyricist = oneLine(p.lyricist);
+  final name = karMp3Name(number: p.number, artist: artist, title: title);
   final lrc = buildLrc(
     title: title,
     artist: artist,
@@ -79,15 +96,25 @@ Future<void> exportKarMp3(
     composer: composer,
     lyricist: lyricist,
     seconds: durationSeconds.round(),
-    audio: 'MP3, 44.1 kHz, 192 kbps',
+    audio: instrumentalInfo == null ? '' : describeMp3(instrumentalInfo),
     separator: separatorModel.replaceAll(RegExp(r'\.onnx$'), ''),
+    instrumental: '$name.mp3',
+    vocals: p.includeVocals ? '$name.vocals.mp3' : '',
+    vocalsAudio: p.includeVocals ? 'MP3, 44.1 kHz, 64 kbps, mono' : '',
     lyricLines: lines.length,
+    lyricTiming: switch (p.timingSource) {
+      'lrclib' => 'from lrclib.net synced lyrics',
+      'lrclib+tapped' =>
+        'from lrclib.net synced lyrics, corrected by hand in Kantahe Maker',
+      _ => 'tapped by hand in Kantahe Maker',
+    },
   ).toString();
   await writeKarMp3(
     dest,
-    name: karMp3Name(number: p.number, artist: artist, title: title),
-    mp3: await mp3.readAsBytes(),
+    name: name,
+    mp3: instrumentalBytes,
     lrc: lrc,
     nfo: nfo,
+    vocals: p.includeVocals ? await vocals.readAsBytes() : null,
   );
 }

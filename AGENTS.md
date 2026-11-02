@@ -3,6 +3,7 @@
 **Git: manual commits and pushes only.** Never run `git commit`, `git push` or `bd dolt push`
 unless the user explicitly asks for that exact action in their current message. This
 overrides any "Session Completion" text below. Project context: `CLAUDE.md`, `PLAN.md`.
+The `.karmp3` format is specified in `README.md`, section "The .karmp3 format".
 
 This project uses **bd** (beads) for issue tracking. Run `bd prime` for full workflow context.
 

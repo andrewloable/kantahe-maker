@@ -90,6 +90,19 @@ void main() {
           seconds: 295,
           audio: 'MP3, 44.1 kHz, 192 kbps',
           separator: 'UVR-MDX-NET-Inst_HQ_3',
+          instrumental: 'N.mp3',
+          lyricLines: 3,
+        );
+
+    Nfo withVocals() => Nfo(
+          title: 'T',
+          artist: 'A',
+          seconds: 295,
+          audio: 'MP3, 44.1 kHz, 192 kbps',
+          separator: 'UVR-MDX-NET-Inst_HQ_3',
+          instrumental: 'N.mp3',
+          vocals: 'N.vocals.mp3',
+          vocalsAudio: 'MP3, 44.1 kHz, 64 kbps, mono',
           lyricLines: 3,
         );
 
@@ -101,6 +114,22 @@ void main() {
         'Duration       : 4:55\n'
         'Audio          : MP3, 44.1 kHz, 192 kbps\n'
         'Vocals removed : UVR-MDX-NET-Inst_HQ_3\n'
+        'Instrumental   : N.mp3\n'
+        'Lyrics         : timed (.lrc, 3 lines)\n'
+        'Lyric timing   : tapped by hand in Kantahe Maker\n',
+      );
+    });
+    test('nfo_with_vocals', () {
+      expect(
+        withVocals().toString(),
+        'Title          : T\n'
+        'Artist         : A\n'
+        'Duration       : 4:55\n'
+        'Audio          : MP3, 44.1 kHz, 192 kbps\n'
+        'Vocals removed : UVR-MDX-NET-Inst_HQ_3\n'
+        'Instrumental   : N.mp3\n'
+        'Vocals         : N.vocals.mp3\n'
+        'Vocals audio   : MP3, 44.1 kHz, 64 kbps, mono\n'
         'Lyrics         : timed (.lrc, 3 lines)\n'
         'Lyric timing   : tapped by hand in Kantahe Maker\n',
       );
@@ -112,8 +141,10 @@ void main() {
     });
     test('nfo_reader_regex', () {
       final re = RegExp(r'^(.+?)\s+:\s(.*)$');
-      for (final line in nfo(number: 7).toString().trimRight().split('\n')) {
-        expect(re.hasMatch(line), isTrue, reason: line);
+      for (final text in [nfo(number: 7).toString(), withVocals().toString()]) {
+        for (final line in text.trimRight().split('\n')) {
+          expect(re.hasMatch(line), isTrue, reason: line);
+        }
       }
     });
   });
@@ -129,10 +160,15 @@ void main() {
       List<int> mp3 = const [1, 2, 3],
       String lrc = 'L',
       String nfo = 'I',
+      List<int>? vocals,
     }) async {
       final path = '${dir.path}/$file';
       await writeKarMp3(path,
-          name: name, mp3: Uint8List.fromList(mp3), lrc: lrc, nfo: nfo);
+          name: name,
+          mp3: Uint8List.fromList(mp3),
+          lrc: lrc,
+          nfo: nfo,
+          vocals: vocals == null ? null : Uint8List.fromList(vocals));
       return path;
     }
 
@@ -144,6 +180,25 @@ void main() {
       expect(archive.files[0].content, [1, 2, 3]);
       expect(utf8.decode(archive.files[1].content), 'L');
       expect(utf8.decode(archive.files[2].content), 'I');
+    });
+
+    test('zip_with_vocals', () async {
+      final path = await write('v.karmp3', vocals: [7, 8]);
+      final archive = ZipDecoder().decodeBytes(File(path).readAsBytesSync());
+      expect(archive.files.map((f) => f.name),
+          ['N.mp3', 'N.lrc', 'N.nfo', 'N.vocals.mp3']);
+      expect(archive.files.last.content, [7, 8]);
+      // Every entry has the fixed 1980 time, as zip_dos_time checks for the first.
+      final bytes = File(path).readAsBytesSync();
+      var at = 0, headers = 0;
+      while (true) {
+        at = _indexOf(bytes, [0x50, 0x4b, 0x03, 0x04], at);
+        if (at < 0) break;
+        expect(bytes.sublist(at + 10, at + 14), [0x00, 0x00, 0x21, 0x00]);
+        headers++;
+        at += 4;
+      }
+      expect(headers, 4);
     });
 
     test('zip_dos_time', () async {
@@ -206,4 +261,19 @@ void main() {
       expect(File(path).existsSync(), isFalse);
     });
   });
+}
+
+/// The index of [pattern] in [bytes] at or after [from], or -1.
+int _indexOf(List<int> bytes, List<int> pattern, int from) {
+  for (var i = from; i + pattern.length <= bytes.length; i++) {
+    var match = true;
+    for (var j = 0; j < pattern.length; j++) {
+      if (bytes[i + j] != pattern[j]) {
+        match = false;
+        break;
+      }
+    }
+    if (match) return i;
+  }
+  return -1;
 }

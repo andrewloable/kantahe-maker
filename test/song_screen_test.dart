@@ -10,6 +10,8 @@ import 'package:kantahe_maker/jobs.dart';
 import 'package:kantahe_maker/karmp3.dart' show karMp3Name;
 import 'package:kantahe_maker/lyrics_lookup.dart';
 import 'package:kantahe_maker/screens/lyrics_search_panel.dart';
+import 'package:kantahe_maker/screens/song_info_panel.dart';
+import 'package:kantahe_maker/song_info.dart';
 import 'package:kantahe_maker/pipeline.dart';
 import 'package:kantahe_maker/project.dart';
 import 'package:kantahe_maker/screens/song_screen.dart';
@@ -51,6 +53,8 @@ class FakeSepJob implements CancellableJob {
   void emit(String line) => onLine(line);
 
   void finish() {
+    // The vocals first, as the real separation does.
+    File('${work.path}/vocals.mp3').writeAsBytesSync([5, 5]);
     File('${work.path}/instrumental.mp3').writeAsBytesSync([9, 9]);
     _done.complete();
   }
@@ -96,12 +100,16 @@ Future<Song> pumpSong(
   void Function(SongProject)? configure,
   bool source = false,
   bool instrumental = false,
+  bool vocals = false,
   bool settleAtOnce = true,
   String? corruptJson,
   bool toolsAvailable = true,
   Object? importError,
   LyricsFinder? lyricsFinder,
   Completer<void>? importGate,
+  SongInfoFinder? songInfoFinder,
+  Future<({String composer, String lyricist})> Function(String)?
+  songInfoDetailsFn,
   Future<({String title, String artist})> Function(ToolPaths, String)? tagsFn,
   bool onTopOfHome = false,
 }) async {
@@ -123,6 +131,9 @@ Future<Song> pumpSong(
   }
   if (instrumental) {
     File('${s.dir.path}/instrumental.mp3').writeAsBytesSync([9, 9]);
+  }
+  if (vocals) {
+    File('${s.dir.path}/vocals.mp3').writeAsBytesSync([5, 5]);
   }
   await tester.binding.setSurfaceSize(const Size(1000, 3600));
   addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -162,6 +173,10 @@ Future<Song> pumpSong(
     revealFile: (path) async => s.revealed.add(path),
     // Never the real lrclib.net in a test.
     lyricsFinder: lyricsFinder ?? (title, artist) async => const [],
+    // Never the real musicbrainz.org either.
+    songInfoFinder: songInfoFinder ?? (title, artist) async => const [],
+    songInfoDetailsFn:
+        songInfoDetailsFn ?? (id) async => (composer: '', lyricist: ''),
     tagsFn: tagsFn ?? (tools, input) async => (title: '', artist: ''),
   );
   await tester.pumpWidget(
@@ -931,6 +946,155 @@ void main() {
         .controller!
         .text;
 
+    testWidgets('picking_synced_lyrics_pre_times_the_lines', (tester) async {
+      final s = await pumpSong(
+        tester,
+        configure: named,
+        source: true,
+        instrumental: true,
+        lyricsFinder: (t, a) async => [
+          const LyricsCandidate(
+            title: 'T',
+            artist: 'A',
+            album: '',
+            lyrics: 'a\nb',
+            synced: [(1.0, 'a'), (2.0, 'b')],
+          ),
+        ],
+      );
+      await tapAndWait(tester, 'lyrics-result-0');
+      await settle(
+        tester,
+        until: () => s.json()['lyrics'] == 'a\nb',
+        describe: s.describe,
+      );
+      expect(s.json()['times'], [1.0, 2.0]);
+      expect(s.json()['timingSource'], 'lrclib');
+      await goTo(tester, WizardStep.timing);
+      expect(find.byKey(const ValueKey('timing-from-lrclib')), findsOneWidget);
+      expect(
+        tester.widget<Text>(find.byKey(const ValueKey('timing-status'))).data,
+        'All 2 lines tapped',
+      );
+    });
+
+    testWidgets('a_tap_marks_the_timing_corrected', (tester) async {
+      final s = await pumpSong(
+        tester,
+        configure: (p) => named(p)
+          ..lyrics = 'a\nb'
+          ..times = [1.0, 2.0]
+          ..timingSource = 'lrclib',
+        source: true,
+        instrumental: true,
+      );
+      await goTo(tester, WizardStep.timing);
+      await settle(tester, until: () => find.byType(TapScreen).evaluate().isNotEmpty);
+      expect(s.json()['timingSource'], 'lrclib', reason: 'looking is not correcting');
+      // A change on the tap screen (here the tap offset) is a correction by hand.
+      tester.widget<Slider>(find.byKey(const ValueKey('offset'))).onChanged!(-0.25);
+      await tester.pump();
+      await settle(
+        tester,
+        until: () => s.json()['timingSource'] == 'lrclib+tapped',
+        describe: s.describe,
+      );
+    });
+
+    testWidgets('picking_synced_lyrics_drops_the_old_word_times', (tester) async {
+      final s = await pumpSong(
+        tester,
+        configure: (p) => named(p)
+          ..lyrics = 'a b\nc d'
+          ..times = [1, 2]
+          ..wordTimes = [
+            [1.0, 1.5],
+            [2.0, 2.5],
+          ],
+        source: true,
+        instrumental: true,
+        lyricsFinder: (t, a) async => [
+          const LyricsCandidate(
+            title: 'T',
+            artist: 'A',
+            album: '',
+            lyrics: 'a b\nX Y',
+            synced: [(5.0, 'a b'), (6.0, 'X Y')],
+          ),
+        ],
+      );
+      await goTo(tester, WizardStep.lyrics);
+      await tapAndWait(tester, 'lyrics-search');
+      await tapAndWait(tester, 'lyrics-result-0');
+      await tapAndWait(tester, 'lyrics-replace');
+      await settle(
+        tester,
+        until: () => s.json()['lyrics'] == 'a b\nX Y',
+        describe: s.describe,
+      );
+      expect(s.json()['times'], [5.0, 6.0]);
+      expect(s.json()['wordTimes'], [null, null]);
+    });
+
+    testWidgets('the_note_stays_after_a_correction', (tester) async {
+      final s = await pumpSong(
+        tester,
+        configure: (p) => named(p)
+          ..lyrics = 'a\nb'
+          ..times = [1.0, 2.0]
+          ..timingSource = 'lrclib',
+        source: true,
+        instrumental: true,
+      );
+      await goTo(tester, WizardStep.timing);
+      await settle(tester, until: () => find.byType(TapScreen).evaluate().isNotEmpty);
+      tester.widget<Slider>(find.byKey(const ValueKey('offset'))).onChanged!(-0.25);
+      await tester.pump();
+      await settle(
+        tester,
+        until: () => s.json()['timingSource'] == 'lrclib+tapped',
+        describe: s.describe,
+      );
+      expect(find.byKey(const ValueKey('timing-from-lrclib')), findsOneWidget);
+    });
+
+    testWidgets('no_lrclib_note_for_hand_tapped_timing', (tester) async {
+      await pumpSong(
+        tester,
+        configure: (p) => named(p)
+          ..lyrics = 'a\nb'
+          ..times = [1.0, 2.0],
+        source: true,
+        instrumental: true,
+      );
+      await goTo(tester, WizardStep.timing);
+      await settle(tester, until: () => find.byType(TapScreen).evaluate().isNotEmpty);
+      expect(find.byKey(const ValueKey('timing-from-lrclib')), findsNothing);
+    });
+
+    testWidgets('picking_plain_lyrics_resets_the_source', (tester) async {
+      final s = await pumpSong(
+        tester,
+        configure: (p) => named(p)
+          ..lyrics = 'old'
+          ..times = [1.0]
+          ..timingSource = 'lrclib',
+        source: true,
+        instrumental: true,
+        lyricsFinder: (t, a) async => [found],
+      );
+      await goTo(tester, WizardStep.lyrics);
+      await tapAndWait(tester, 'lyrics-search');
+      await tapAndWait(tester, 'lyrics-result-0');
+      await tapAndWait(tester, 'lyrics-replace');
+      await settle(
+        tester,
+        until: () => s.json()['lyrics'] == 'a\nX\nc',
+        describe: s.describe,
+      );
+      expect(s.json()['timingSource'], 'tapped');
+    });
+
     testWidgets('lyrics_step_searches_automatically_once', (tester) async {
       final (calls, finder) = recording(() async => [found]);
       await pumpSong(
@@ -1364,6 +1528,315 @@ void main() {
         until: () => find.byType(SongScreen).evaluate().isEmpty,
       );
       expect(find.text('home route'), findsOneWidget);
+    });
+  });
+
+  group('vocals option', () {
+    Finder exportButton() =>
+        find.widgetWithText(FilledButton, 'Export .karmp3');
+    bool exportEnabled(WidgetTester tester) =>
+        tester.widget<FilledButton>(exportButton()).onPressed != null;
+    bool ticked(WidgetTester tester) => tester
+        .widget<CheckboxListTile>(find.byKey(const ValueKey('export-vocals')))
+        .value!;
+    SongProject vocalsOn(SongProject p) => tappedSong(p)..includeVocals = true;
+
+    testWidgets('vocals_option_is_off_and_saved', (tester) async {
+      final s = await pumpSong(
+        tester,
+        configure: tappedSong,
+        source: true,
+        instrumental: true,
+        vocals: true,
+      );
+      expect(ticked(tester), isFalse);
+      await tester.tap(find.byKey(const ValueKey('export-vocals')));
+      await tester.pump();
+      await settle(
+        tester,
+        until: () => s.json()['includeVocals'] == true,
+        describe: s.describe,
+      );
+      expect(ticked(tester), isTrue);
+    });
+
+    testWidgets('export_with_the_vocals_ticked', (tester) async {
+      final s = await pumpSong(
+        tester,
+        configure: vocalsOn,
+        source: true,
+        instrumental: true,
+        vocals: true,
+      );
+      s.savePath = '${s.root.path}/out.karmp3';
+      await tester.tap(exportButton());
+      await settle(tester, until: () => File(s.savePath!).existsSync());
+      final zip = ZipDecoder().decodeBytes(File(s.savePath!).readAsBytesSync());
+      expect(zip.files.map((f) => f.name), [
+        'A - T.mp3',
+        'A - T.lrc',
+        'A - T.nfo',
+        'A - T.vocals.mp3',
+      ]);
+      expect(zip.files.last.content, [5, 5]);
+    });
+
+    testWidgets('old_song_offers_to_run_vocal_removal_again', (tester) async {
+      final s = await pumpSong(
+        tester,
+        configure: vocalsOn,
+        source: true,
+        instrumental: true,
+      );
+      expect(find.byKey(const ValueKey('vocals-missing')), findsOneWidget);
+      expect(exportEnabled(tester), isFalse);
+      await tester.tap(find.byKey(const ValueKey('vocals-rerun')));
+      await tester.pump();
+      await settle(tester, until: () => s.seps.length == 1);
+      s.sep.finish();
+      await settle(
+        tester,
+        until: () =>
+            find.byKey(const ValueKey('vocals-missing')).evaluate().isEmpty &&
+            exportEnabled(tester),
+      );
+      expect(File('${s.dir.path}/vocals.mp3').existsSync(), isTrue);
+    });
+
+    testWidgets('rerun_button_is_hidden_while_it_runs', (tester) async {
+      final s = await pumpSong(
+        tester,
+        configure: vocalsOn,
+        source: true,
+        instrumental: true,
+      );
+      await tester.tap(find.byKey(const ValueKey('vocals-rerun')));
+      await tester.pump();
+      await settle(tester, until: () => s.seps.length == 1);
+      expect(find.byKey(const ValueKey('vocals-rerun')), findsNothing);
+      expect(find.byKey(const ValueKey('vocals-missing')), findsNothing);
+      expect(s.seps, hasLength(1));
+      s.sep.finish();
+      await settle(tester, until: () => jobs.length == 0);
+    });
+
+    testWidgets('no_rerun_note_without_an_instrumental', (tester) async {
+      final s = await pumpSong(tester, configure: vocalsOn, source: true);
+      await settle(tester, until: () => s.seps.length == 1);
+      await goTo(tester, WizardStep.export);
+      s.sep.fail(StateError('x'));
+      await settle(
+        tester,
+        until: () =>
+            find.byKey(const ValueKey('vocals-status')).evaluate().isNotEmpty,
+      );
+      expect(find.byKey(const ValueKey('vocals-missing')), findsNothing);
+      expect(find.byKey(const ValueKey('vocals-rerun')), findsNothing);
+      expect(shown('Remove vocals: not finished'), isTrue);
+    });
+
+    testWidgets('failed_rerun_keeps_the_old_instrumental', (tester) async {
+      final s = await pumpSong(
+        tester,
+        configure: vocalsOn,
+        source: true,
+        instrumental: true,
+      );
+      await tester.tap(find.byKey(const ValueKey('vocals-rerun')));
+      await tester.pump();
+      await settle(tester, until: () => s.seps.length == 1);
+      s.sep.fail(StateError('x'));
+      await settle(
+        tester,
+        until: () =>
+            find.byKey(const ValueKey('vocals-status')).evaluate().isNotEmpty,
+      );
+      expect(shown('Vocal removal failed'), isTrue);
+      await tester.tap(find.byKey(const ValueKey('export-vocals')));
+      await tester.pump();
+      expect(ticked(tester), isFalse);
+      expect(
+        exportEnabled(tester),
+        isTrue,
+        reason: 'the old instrumental still counts',
+      );
+    });
+
+    testWidgets('unticking_removes_the_note', (tester) async {
+      await pumpSong(
+        tester,
+        configure: vocalsOn,
+        source: true,
+        instrumental: true,
+      );
+      expect(find.byKey(const ValueKey('vocals-missing')), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('export-vocals')));
+      await tester.pump();
+      expect(find.byKey(const ValueKey('vocals-missing')), findsNothing);
+      expect(exportEnabled(tester), isTrue);
+    });
+  });
+
+  group('song info', () {
+    const found = SongInfoCandidate(
+      title: 'Song',
+      artist: 'Singer',
+      album: 'Album',
+      year: '1999',
+      recordingId: 'r1',
+    );
+
+    /// A finder that records its calls.
+    (List<(String, String)>, SongInfoFinder) recording(
+      List<SongInfoCandidate> answer,
+    ) {
+      final calls = <(String, String)>[];
+      return (
+        calls,
+        (t, a) async {
+          calls.add((t, a));
+          return answer;
+        },
+      );
+    }
+
+    testWidgets('details_step_searches_automatically_once', (tester) async {
+      final (calls, finder) = recording([found]);
+      await pumpSong(
+        tester,
+        source: true,
+        instrumental: true,
+        songInfoFinder: finder,
+      );
+      expect(find.byKey(const ValueKey('title')), findsOneWidget);
+      expect(calls, [('in', '')]);
+      await goTo(tester, WizardStep.vocals);
+      await goTo(tester, WizardStep.details);
+      await tester.pump();
+      expect(calls, hasLength(1), reason: 'same query: no new search');
+    });
+
+    testWidgets('search_uses_the_typed_title', (tester) async {
+      final (calls, finder) = recording([found]);
+      await pumpSong(
+        tester,
+        configure: named,
+        source: true,
+        instrumental: true,
+        songInfoFinder: finder,
+      );
+      await goTo(tester, WizardStep.details);
+      await tester.pump();
+      expect(calls, [('T', 'A')]);
+    });
+
+    testWidgets('picking_fills_names_and_blank_credits', (tester) async {
+      final asked = <String>[];
+      final s = await pumpSong(
+        tester,
+        configure: (p) => p.composer = 'Mine',
+        source: true,
+        instrumental: true,
+        songInfoFinder: (t, a) async => [found],
+        songInfoDetailsFn: (id) async {
+          asked.add(id);
+          return (composer: 'C', lyricist: 'L');
+        },
+      );
+      await tester.tap(find.byKey(const ValueKey('info-result-0')));
+      await tester.pump();
+      await settle(
+        tester,
+        until: () => s.json()['lyricist'] == 'L',
+        describe: s.describe,
+      );
+      expect(s.json()['title'], 'Song');
+      expect(s.json()['artist'], 'Singer');
+      expect(s.json()['composer'], 'Mine');
+      expect(asked, ['r1']);
+    });
+
+    String textOf(WidgetTester tester, String key) => tester
+        .widget<TextField>(find.byKey(ValueKey(key)))
+        .controller!
+        .text;
+
+    testWidgets('picking_updates_the_text_fields', (tester) async {
+      await pumpSong(
+        tester,
+        source: true,
+        instrumental: true,
+        songInfoFinder: (t, a) async => [found],
+        songInfoDetailsFn: (id) async => (composer: 'C', lyricist: 'L'),
+      );
+      await tester.tap(find.byKey(const ValueKey('info-result-0')));
+      await tester.pump();
+      await settle(tester, until: () => textOf(tester, 'lyricist') == 'L');
+      expect(textOf(tester, 'title'), 'Song');
+      expect(textOf(tester, 'artist'), 'Singer');
+      expect(textOf(tester, 'composer'), 'C');
+    });
+
+    testWidgets('picking_keeps_a_typed_lyricist', (tester) async {
+      final s = await pumpSong(
+        tester,
+        configure: (p) => p.lyricist = 'Mine',
+        source: true,
+        instrumental: true,
+        songInfoFinder: (t, a) async => [found],
+        songInfoDetailsFn: (id) async => (composer: 'C', lyricist: 'L'),
+      );
+      await tester.tap(find.byKey(const ValueKey('info-result-0')));
+      await tester.pump();
+      await settle(
+        tester,
+        until: () => s.json()['composer'] == 'C',
+        describe: s.describe,
+      );
+      expect(s.json()['lyricist'], 'Mine');
+      expect(textOf(tester, 'lyricist'), 'Mine');
+    });
+
+    testWidgets('the_spinner_goes_when_the_details_are_in', (tester) async {
+      final credits = Completer<({String composer, String lyricist})>();
+      await pumpSong(
+        tester,
+        source: true,
+        instrumental: true,
+        songInfoFinder: (t, a) async => [found],
+        songInfoDetailsFn: (id) => credits.future,
+      );
+      await tester.tap(find.byKey(const ValueKey('info-result-0')));
+      await tester.pump();
+      expect(find.byKey(const ValueKey('info-loading')), findsOneWidget);
+      credits.complete((composer: '', lyricist: ''));
+      await settle(
+        tester,
+        until: () =>
+            find.byKey(const ValueKey('info-loading')).evaluate().isEmpty,
+      );
+    });
+
+    testWidgets('details_failure_still_applies_names', (tester) async {
+      final s = await pumpSong(
+        tester,
+        source: true,
+        instrumental: true,
+        songInfoFinder: (t, a) async => [found],
+        songInfoDetailsFn: (id) async => throw StateError('down'),
+      );
+      await tester.tap(find.byKey(const ValueKey('info-result-0')));
+      await tester.pump();
+      await settle(
+        tester,
+        until: () => shown('Could not get the composer and lyricist'),
+      );
+      await settle(
+        tester,
+        until: () => s.json()['title'] == 'Song',
+        describe: s.describe,
+      );
+      expect(s.json()['artist'], 'Singer');
     });
   });
 }

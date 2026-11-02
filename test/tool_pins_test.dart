@@ -76,7 +76,6 @@ void main() {
 
   test('separator_settings', () {
     expect(separatorModel, 'UVR-MDX-NET-Inst_HQ_3.onnx');
-    expect(singleStemInstrumental, 'Instrumental');
     // audio-separator imports audioread but does not declare it (found by hand).
     expect(separatorExtraPackages, contains('audioread'));
   });

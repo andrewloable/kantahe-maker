@@ -18,6 +18,28 @@ bool hasSeq(List<String> list, List<String> seq) {
   return false;
 }
 
+// What ffmpeg's loudnorm prints on stderr (first pass), with ffmpeg's other lines around.
+const loudnormJsonBlock = '''{
+	"input_i" : "-7.56",
+	"input_tp" : "0.39",
+	"input_lra" : "2.20",
+	"input_thresh" : "-17.56",
+	"output_i" : "-16.02",
+	"output_tp" : "-1.50",
+	"output_lra" : "1.90",
+	"output_thresh" : "-26.00",
+	"normalization_type" : "dynamic",
+	"target_offset" : "-0.01"
+}''';
+
+const loudnormOutput = '''
+ffmpeg version 9.0.2 Copyright (c) 2000-2026 the FFmpeg developers
+Input #0, wav, from 'stem.wav':
+  Duration: 00:00:20.00, bitrate: 1411 kb/s
+[Parsed_loudnorm_0 @ 0x7631008900]
+$loudnormJsonBlock
+''';
+
 void main() {
   group('ffprobe args', () {
     test('probe_codec_args', () {
@@ -77,7 +99,7 @@ void main() {
     });
     test('args_encode_instrumental', () {
       final a = encodeInstrumentalArgs('i.wav', 'o.mp3');
-      expect(hasSeq(a, ['-b:a', '192k']), isTrue);
+      expect(hasSeq(a, ['-b:a', '128k']), isTrue);
       expect(hasSeq(a, ['-map_metadata', '-1']), isTrue);
       expect(hasSeq(a, ['-c:a', 'libmp3lame']), isTrue);
       expect(hasSeq(a, ['-ar', '44100']), isTrue);
@@ -93,7 +115,93 @@ void main() {
     expect(hasSeq(a, ['--model_file_dir', '/t/models']), isTrue);
     expect(hasSeq(a, ['--output_dir', '/w/sep']), isTrue);
     expect(hasSeq(a, ['--output_format', 'WAV']), isTrue);
-    expect(hasSeq(a, ['--single_stem', singleStemInstrumental]), isTrue);
+    expect(a, isNot(contains('--single_stem')));
+  });
+
+  test('args_measure_loudness', () {
+    expect(measureLoudnessArgs('in.wav', mono: false), [
+      '-hide_banner', '-nostats', '-i', 'in.wav',
+      '-af', 'loudnorm=I=-16:TP=-1.5:LRA=11:print_format=json',
+      '-f', 'null', '-',
+    ]);
+    final mono = measureLoudnessArgs('in.wav', mono: true);
+    expect(
+      mono[mono.indexOf('-af') + 1],
+      'aformat=channel_layouts=mono,loudnorm=I=-16:TP=-1.5:LRA=11:print_format=json',
+    );
+  });
+
+  test('parse_loudness_from_ffmpeg_output', () {
+    final l = parseLoudness(loudnormOutput)!;
+    expect(l.input, -7.56);
+    expect(l.truePeak, 0.39);
+    expect(l.range, 2.2);
+    expect(l.threshold, -17.56);
+    expect(l.offset, -0.01);
+  });
+
+  test('parse_loudness_takes_the_last_block', () {
+    final l = parseLoudness('Metadata: {"title": "x"}\n$loudnormOutput')!;
+    expect(l.input, -7.56);
+    expect(l.truePeak, 0.39);
+    expect(l.range, 2.2);
+    expect(l.threshold, -17.56);
+    expect(l.offset, -0.01);
+  });
+
+  test('parse_loudness_unusable', () {
+    expect(parseLoudness(''), isNull);
+    expect(parseLoudness('no json here'), isNull);
+    expect(parseLoudness('{not json}'), isNull);
+    expect(
+      parseLoudness(loudnormJsonBlock.replaceFirst('"-7.56"', '"-inf"')),
+      isNull,
+      reason: 'silence is measured as -inf',
+    );
+    expect(
+      parseLoudness(loudnormJsonBlock.replaceFirst('"target_offset"', '"x"')),
+      isNull,
+    );
+    // Dart reads these as numbers that are not finite.
+    for (final bad in ['"Infinity"', '"NaN"']) {
+      expect(
+        parseLoudness(loudnormJsonBlock.replaceFirst('"-7.56"', bad)),
+        isNull,
+        reason: bad,
+      );
+    }
+  });
+
+  test('args_encode_with_loudness', () {
+    const l = Loudness(
+      input: -7.56,
+      truePeak: 0.39,
+      range: 2.2,
+      threshold: -17.56,
+      offset: -0.01,
+    );
+    const filter =
+        'loudnorm=I=-16:TP=-1.5:LRA=11:measured_I=-7.56:measured_TP=0.39:'
+        'measured_LRA=2.2:measured_thresh=-17.56:offset=-0.01:linear=true';
+    expect(encodeInstrumentalArgs('i.wav', 'o.mp3', loudness: l), [
+      '-y', '-i', 'i.wav', '-af', filter, '-map_metadata', '-1',
+      '-c:a', 'libmp3lame', '-b:a', '128k', '-ar', '44100', '-ac', '2',
+      '-f', 'mp3', 'o.mp3',
+    ]);
+    expect(encodeVocalsArgs('v.wav', 'o.mp3', loudness: l), [
+      '-y', '-i', 'v.wav', '-af', 'aformat=channel_layouts=mono,$filter',
+      '-map_metadata', '-1',
+      '-c:a', 'libmp3lame', '-b:a', '64k', '-ar', '44100', '-ac', '1',
+      '-f', 'mp3', 'o.mp3',
+    ]);
+  });
+
+  test('args_encode_vocals', () {
+    expect(encodeVocalsArgs('v.wav', 'o.mp3'), [
+      '-y', '-i', 'v.wav', '-map_metadata', '-1',
+      '-c:a', 'libmp3lame', '-b:a', '64k', '-ar', '44100', '-ac', '1',
+      '-f', 'mp3', 'o.mp3',
+    ]);
   });
 
   test('is_mp3', () {
@@ -124,6 +232,14 @@ void main() {
         isNull,
         reason: 'two candidates is ambiguous',
       );
+    });
+    test('find_vocals_next_to_the_instrumental', () {
+      touch('x_(Vocals)_m.wav');
+      touch('x_(Instrumental)_m.wav');
+      expect(findVocals(tmp)?.path, endsWith('(Vocals)_m.wav'));
+      expect(findInstrumental(tmp)?.path, endsWith('(Instrumental)_m.wav'));
+      File('${tmp.path}/x_(Vocals)_m.wav').deleteSync();
+      expect(findVocals(tmp), isNull);
     });
     test('find_none', () {
       expect(findInstrumental(tmp), isNull);
@@ -216,6 +332,17 @@ void main() {
   void ff(List<String> args) {
     final r = Process.runSync(ffmpegPath!, ['-v', 'error', '-y', ...args]);
     if (r.exitCode != 0) throw Exception('ffmpeg failed: ${r.stderr}');
+  }
+
+  /// The integrated loudness of [file] in LUFS, measured with ffmpeg's ebur128 filter.
+  double loudnessOf(String file) {
+    final r = Process.runSync(ffmpegPath!, [
+      '-hide_banner', '-nostats', '-i', file, '-af', 'ebur128', '-f', 'null', '-',
+    ]);
+    final m = RegExp(r'Integrated loudness:\s*\n\s*I:\s*(-?[\d.]+|-inf)\s*LUFS')
+        .firstMatch(r.stderr.toString());
+    if (m == null) throw Exception('no loudness in: ${r.stderr}');
+    return m.group(1) == '-inf' ? double.negativeInfinity : double.parse(m.group(1)!);
   }
 
   String probe(String file, String entries) =>
@@ -455,9 +582,57 @@ echo "$*" >> __LOG__
 echo "working"
 while [ $# -gt 0 ]; do if [ "$1" = "--output_dir" ]; then out="$2"; fi; shift; done
 cp "__WAV__" "$out/x_(Instrumental)_m.wav"
+cp "__WAV__" "$out/x_(Vocals)_m.wav"
 '''
           .replaceAll('__LOG__', sepLog)
           .replaceAll('__WAV__', wavFixture),
+    );
+
+    String ffLog() => '${tmp.path}/ff.log';
+
+    /// A fake ffmpeg for the separation: every call is logged. The measuring call (the
+    /// one with print_format=json) runs [measure] and then prints a loudnorm measurement
+    /// on stderr; every other call runs [encode] and creates its output file.
+    String fakeFfmpeg({String measure = '', String encode = ''}) => _fakeScript(
+      tmp.path,
+      'ffmpeg',
+      r'''
+echo "$*" >> __LOG__
+for last; do :; done
+case "$*" in
+  *print_format=json*)
+__MEASURE__
+cat >&2 <<'JSON'
+__JSON__
+JSON
+    ;;
+  *)
+__ENCODE__
+    echo x > "$last"
+    ;;
+esac
+'''
+          .replaceAll('__LOG__', ffLog())
+          .replaceAll('__MEASURE__', measure)
+          .replaceAll('__ENCODE__', encode)
+          .replaceAll('__JSON__', loudnormJsonBlock),
+    );
+
+    /// A file with a few bytes in it, for a fake separator to copy; returns its path.
+    String dummy(String name) =>
+        (File('${tmp.path}/$name')..writeAsStringSync('x')).path;
+
+    /// A separator that writes [instrumental] and [vocals] (WAV files) as its stems.
+    String stemsSeparator(String instrumental, String vocals) => _fakeScript(
+      tmp.path,
+      'stemsep',
+      r'''
+while [ $# -gt 0 ]; do if [ "$1" = "--output_dir" ]; then out="$2"; fi; shift; done
+cp "__I__" "$out/x_(Instrumental)_m.wav"
+cp "__V__" "$out/x_(Vocals)_m.wav"
+'''
+          .replaceAll('__I__', instrumental)
+          .replaceAll('__V__', vocals),
     );
 
     /// A separator that stays alive for a long time, with a child process (sleep).
@@ -509,6 +684,7 @@ cp "__WAV__" "$out/x_(Instrumental)_m.wav"
       );
       await job.done;
       expect(File('${work.path}/instrumental.mp3').existsSync(), isTrue);
+      expect(File('${work.path}/vocals.mp3').existsSync(), isTrue);
       expect(Directory('${work.path}/sep').existsSync(), isFalse);
       expect(leftovers(work), isEmpty);
       expect(lines, contains('working'));
@@ -517,11 +693,27 @@ cp "__WAV__" "$out/x_(Instrumental)_m.wav"
           '${work.path}/instrumental.mp3',
           'stream=codec_name,sample_rate,channels,bit_rate',
         ),
-        'mp3,44100,2,192000',
+        'mp3,44100,2,128000',
       );
+      expect(
+        probe(
+          '${work.path}/vocals.mp3',
+          'stream=codec_name,sample_rate,channels,bit_rate',
+        ),
+        'mp3,44100,1,64000',
+      );
+      final lengthOfInstrumental = await durationSeconds(
+        realTools(),
+        '${work.path}/instrumental.mp3',
+      );
+      final lengthOfVocals = await durationSeconds(
+        realTools(),
+        '${work.path}/vocals.mp3',
+      );
+      expect((lengthOfInstrumental - lengthOfVocals).abs(), lessThan(0.05));
       final args = File(sepLog).readAsStringSync();
       expect(args, contains('${work.path}/source.wav'));
-      expect(args, contains('--single_stem Instrumental'));
+      expect(args, isNot(contains('--single_stem')));
     }, skip: noShOrFfmpeg);
 
     test('separate_cancel', () async {
@@ -549,12 +741,10 @@ cp "__WAV__" "$out/x_(Instrumental)_m.wav"
       final sep = _fakeScript(tmp.path, 'sep', r'''
 while [ $# -gt 0 ]; do if [ "$1" = "--output_dir" ]; then out="$2"; fi; shift; done
 echo wav > "$out/x_(Instrumental)_m.wav"
+echo wav > "$out/x_(Vocals)_m.wav"
 ''');
-      final slowFfmpeg = _fakeScript(
-        tmp.path,
-        'ffmpeg',
-        'touch "$marked"\nsleep $marker\n',
-      );
+      // Measures normally and sleeps in the first encode.
+      final slowFfmpeg = fakeFfmpeg(encode: 'touch "$marked"\nsleep $marker');
       final job = patient(
         ToolPaths(
           ffmpeg: slowFfmpeg,
@@ -700,16 +890,166 @@ echo wav > "$out/x_(Instrumental)_m.wav"
       expect(Directory('${work.path}/sep').existsSync(), isFalse);
     }, skip: noSh);
 
-    test('separate_ffmpeg_failure_removes_part_file', () async {
+    test('separate_normalizes_both_files', () async {
+      final wav = '${tmp.path}/quiet.wav';
+      ff([
+        '-f', 'lavfi', '-i', 'sine=frequency=440:duration=6',
+        '-af', 'volume=-12dB', '-ac', '2', '-ar', '44100', wav,
+      ]);
+      expect(loudnessOf(wav), lessThan(-25), reason: 'the fixture is quiet');
+      final job = separate(realTools(separator: copyingSeparator(wav)), work);
+      await job.done;
+      expect(loudnessOf('${work.path}/instrumental.mp3'), closeTo(-16, 1.0));
+      expect(loudnessOf('${work.path}/vocals.mp3'), closeTo(-16, 1.0));
+      const entries = 'stream=codec_name,sample_rate,channels,bit_rate';
+      expect(probe('${work.path}/instrumental.mp3', entries), 'mp3,44100,2,128000');
+      expect(probe('${work.path}/vocals.mp3', entries), 'mp3,44100,1,64000');
+      expect(leftovers(work), isEmpty);
+    }, skip: noShOrFfmpeg);
+
+    /// A separation with a quiet tone as the instrumental and the stem that ffmpeg
+    /// makes from [vocalsInput] (ffmpeg arguments up to the output) as the vocals.
+    Future<void> separateWithVocals(List<String> vocalsInput) async {
+      final loud = '${tmp.path}/loud.wav';
+      ff([
+        '-f', 'lavfi', '-i', 'sine=frequency=440:duration=6',
+        '-af', 'volume=-12dB', '-ac', '2', '-ar', '44100', loud,
+      ]);
+      final quiet = '${tmp.path}/quiet-vocals.wav';
+      ff([...vocalsInput, '-ac', '2', '-ar', '44100', quiet]);
+      await separate(
+        realTools(separator: stemsSeparator(loud, quiet)),
+        work,
+      ).done;
+      expect(loudnessOf('${work.path}/instrumental.mp3'), closeTo(-16, 1.0));
+    }
+
+    test('separate_leaves_a_silent_stem_alone', () async {
+      // The tone source is at -18 dBFS; this makes about -60 LUFS: finite, but quieter
+      // than silenceFloorLufs.
+      await separateWithVocals([
+        '-f', 'lavfi', '-i', 'sine=frequency=440:duration=6', '-af', 'volume=-40dB',
+      ]);
+      final measured = loudnessOf('${tmp.path}/quiet-vocals.wav');
+      expect(measured, allOf(greaterThan(-70), lessThan(-50)));
+      expect(File('${work.path}/vocals.mp3').existsSync(), isTrue);
+      expect(
+        loudnessOf('${work.path}/vocals.mp3'),
+        lessThan(-50),
+        reason: 'it was not boosted',
+      );
+    }, skip: noShOrFfmpeg);
+
+    test('separate_leaves_digital_silence_alone', () async {
+      // ffmpeg measures digital silence as -inf, which has no usable gain.
+      await separateWithVocals([
+        '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo', '-t', '6',
+      ]);
+      expect(File('${work.path}/vocals.mp3').existsSync(), isTrue);
+      expect(loudnessOf('${work.path}/vocals.mp3'), lessThan(-50));
+    }, skip: noShOrFfmpeg);
+
+    test('separate_runs_four_ffmpeg_calls_in_order', () async {
+      final job = separate(
+        ToolPaths(
+          ffmpeg: fakeFfmpeg(),
+          ffprobe: 'x',
+          separator: stemsSeparator(dummy('a.wav'), dummy('b.wav')),
+          modelDir: 'm',
+        ),
+        work,
+      );
+      await job.done;
+      final calls = File(ffLog()).readAsLinesSync();
+      expect(calls, hasLength(4));
+      expect(calls[0], allOf(contains('print_format=json'), contains('aformat=channel_layouts=mono')));
+      expect(calls[1], allOf(contains('measured_I='), contains('vocals.part.mp3')));
+      expect(calls[2], allOf(contains('print_format=json'), isNot(contains('aformat'))));
+      expect(calls[3], allOf(contains('measured_I='), contains('instrumental.part.mp3')));
+    }, skip: noSh);
+
+    test('separate_cancel_during_measure', () async {
+      const marker = '3000.35';
+      final marked = '${tmp.path}/measure-started';
+      final job = patient(
+        ToolPaths(
+          ffmpeg: fakeFfmpeg(measure: 'touch "$marked"\nsleep $marker'),
+          ffprobe: 'x',
+          separator: stemsSeparator(dummy('a.wav'), dummy('b.wav')),
+          modelDir: 'm',
+        ),
+        work,
+      );
+      await waitUntil(() => File(marked).existsSync());
+      job.cancel();
+      await expectCancelled(job);
+      expect(alive(marker), isFalse);
+      expect(Directory('${work.path}/sep').existsSync(), isFalse);
+      expect(leftovers(work), isEmpty);
+    }, skip: noSh);
+
+    test('separate_measure_failure_fails_the_job', () async {
+      final job = separate(
+        ToolPaths(
+          ffmpeg: fakeFfmpeg(measure: 'exit 1'),
+          ffprobe: 'x',
+          separator: stemsSeparator(dummy('a.wav'), dummy('b.wav')),
+          modelDir: 'm',
+        ),
+        work,
+      );
+      await expectLater(job.done, throwsA(isA<ProcessFailure>()));
+      expect(File('${work.path}/instrumental.mp3').existsSync(), isFalse);
+      expect(File('${work.path}/vocals.mp3').existsSync(), isFalse);
+      expect(leftovers(work), isEmpty);
+    }, skip: noSh);
+
+    test('separate_no_vocals_file', () async {
       final sep = _fakeScript(tmp.path, 'sep', r'''
 while [ $# -gt 0 ]; do if [ "$1" = "--output_dir" ]; then out="$2"; fi; shift; done
 echo wav > "$out/x_(Instrumental)_m.wav"
 ''');
-      final badFfmpeg = _fakeScript(
+      final job = separate(realTools(separator: sep), work);
+      await expectLater(job.done, throwsStateError);
+      expect(File('${work.path}/instrumental.mp3').existsSync(), isFalse);
+      expect(File('${work.path}/vocals.mp3').existsSync(), isFalse);
+      expect(Directory('${work.path}/sep').existsSync(), isFalse);
+    }, skip: noSh);
+
+    test('separate_vocals_failure_leaves_no_instrumental', () async {
+      final wav = '${tmp.path}/fixture.wav';
+      ff(['-f', 'lavfi', '-i', 'sine=frequency=440:duration=1', '-ac', '2', '-ar', '44100', wav]);
+      // ffmpeg fails when the output is the vocals file and is the real one otherwise.
+      final ffmpeg = _fakeScript(
         tmp.path,
         'ffmpeg',
-        r'for last; do :; done; echo partial > "$last"; exit 1',
+        r'case "$*" in *vocals*) exit 1;; esac'
+        '\nexec "${ffmpegPath!}" '
+        r'"$@"',
       );
+      final job = separate(
+        ToolPaths(
+          ffmpeg: ffmpeg,
+          ffprobe: 'x',
+          separator: copyingSeparator(wav),
+          modelDir: 'm',
+        ),
+        work,
+      );
+      await expectLater(job.done, throwsA(isA<ProcessFailure>()));
+      expect(File('${work.path}/instrumental.mp3').existsSync(), isFalse);
+      expect(File('${work.path}/vocals.mp3').existsSync(), isFalse);
+      expect(leftovers(work), isEmpty);
+    }, skip: noShOrFfmpeg);
+
+    test('separate_ffmpeg_failure_removes_part_file', () async {
+      final sep = _fakeScript(tmp.path, 'sep', r'''
+while [ $# -gt 0 ]; do if [ "$1" = "--output_dir" ]; then out="$2"; fi; shift; done
+echo wav > "$out/x_(Instrumental)_m.wav"
+echo wav > "$out/x_(Vocals)_m.wav"
+''');
+      // Measures normally; every encode leaves a partial file and fails.
+      final badFfmpeg = fakeFfmpeg(encode: r'echo partial > "$last"; exit 1');
       final job = separate(
         ToolPaths(
           ffmpeg: badFfmpeg,
@@ -732,12 +1072,9 @@ echo wav > "$out/x_(Instrumental)_m.wav"
       final sep = _fakeScript(tmp.path, 'sep', r'''
 while [ $# -gt 0 ]; do if [ "$1" = "--output_dir" ]; then out="$2"; fi; shift; done
 echo wav > "$out/new_(Instrumental)_m.wav"
+echo wav > "$out/new_(Vocals)_m.wav"
 ''');
-      final badFfmpeg = _fakeScript(
-        tmp.path,
-        'ffmpeg',
-        r'echo "$*" >> __LOG__'.replaceAll('__LOG__', '${tmp.path}/ff.log'),
-      );
+      final badFfmpeg = fakeFfmpeg();
       final job = separate(
         ToolPaths(
           ffmpeg: badFfmpeg,
