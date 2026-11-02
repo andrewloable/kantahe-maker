@@ -52,6 +52,10 @@ class _KantaheAppState extends State<KantaheApp> {
       theme: brandTheme(Brightness.light),
       darkTheme: brandTheme(Brightness.dark),
       themeMode: ThemeMode.system,
+      // The Flutter macOS engine crashes in its accessibility code when a screen reader
+      // (or any tool that reads the screen) is active, so the app offers no semantics.
+      // It cannot be used with a screen reader (see the README FAQ).
+      builder: (context, child) => ExcludeSemantics(child: child),
       home: widget.home ?? const HomeScreen(),
     );
   }

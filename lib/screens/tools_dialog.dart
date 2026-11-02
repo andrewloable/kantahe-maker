@@ -97,6 +97,9 @@ class _ToolsDialogState extends State<_ToolsDialog> {
   }();
   _Phase _phase = _Phase.ask;
   String _file = '';
+  // True from the first log line on: the downloads are over and uv installs the rest,
+  // which reports lines but no byte counts.
+  bool _installing = false;
   int _received = 0;
   int? _total;
   final List<String> _log = [];
@@ -105,6 +108,7 @@ class _ToolsDialogState extends State<_ToolsDialog> {
   void _onLine(String line) {
     if (!mounted) return;
     setState(() {
+      _installing = true;
       _log.add(line);
       if (_log.length > _maxLogLines) _log.removeAt(0);
     });
@@ -113,6 +117,7 @@ class _ToolsDialogState extends State<_ToolsDialog> {
   void _onProgress(String file, int received, int? total) {
     if (!mounted) return;
     setState(() {
+      _installing = false;
       _file = file;
       _received = received;
       _total = total;
@@ -122,6 +127,7 @@ class _ToolsDialogState extends State<_ToolsDialog> {
   Future<void> _start() async {
     setState(() {
       _phase = _Phase.working;
+      _installing = false;
       _file = '';
       _received = 0;
       _total = null;
@@ -150,7 +156,7 @@ class _ToolsDialogState extends State<_ToolsDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('Download required tools?'),
+      title: Text(_phase == _Phase.working ? 'Downloading required tools' : 'Download required tools?'),
       content: SizedBox(
         width: 560,
         child: SingleChildScrollView(
@@ -174,10 +180,17 @@ class _ToolsDialogState extends State<_ToolsDialog> {
                     ),
                 ],
               _Phase.working => [
-                  Text(_file),
+                  Text(_installing
+                      ? 'Installing Python, audio-separator and the vocal-removal model. '
+                          'This can take several minutes.'
+                      : _file.isEmpty
+                          ? 'Starting...'
+                          : 'Downloading $_file'),
                   const SizedBox(height: 8),
                   LinearProgressIndicator(
-                    value: _total == null || _total == 0 ? null : _received / _total!,
+                    value: _installing || _total == null || _total == 0
+                        ? null
+                        : _received / _total!,
                   ),
                   const SizedBox(height: 12),
                   SizedBox(

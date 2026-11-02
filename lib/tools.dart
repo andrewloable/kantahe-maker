@@ -65,6 +65,16 @@ Map<String, String> uvEnv(ToolsDir d) => {
       'UV_TOOL_BIN_DIR': d.bin,
     };
 
+/// The environment entry that puts [dir] first on PATH. audio-separator runs the bare
+/// name ffmpeg, and an app started from Finder has no PATH that holds it. The key
+/// keeps the spelling it has in [env] (Windows says Path).
+Map<String, String> pathWithDir(String dir, Map<String, String> env, HostOs os) {
+  final key = env.keys.firstWhere((k) => k.toUpperCase() == 'PATH', orElse: () => 'PATH');
+  final old = env[key] ?? '';
+  final separator = os == HostOs.windows ? ';' : ':';
+  return {key: old.isEmpty ? dir : '$dir$separator$old'};
+}
+
 /// Apps started from Finder do not get the shell's PATH, so these two Homebrew
 /// folders are searched by name on macOS.
 const macExtraDirs = <String>['/opt/homebrew/bin', '/usr/local/bin'];
@@ -363,13 +373,18 @@ Future<void> runLogged(
 
 /// Installs audio-separator with uv (uv downloads its own Python, so none is needed
 /// on the machine) and then downloads the model. Everything stays in the tools folder.
+/// With [ffmpeg], its folder is put on PATH for the programs that run.
 Future<void> installSeparator(
   String uvPath,
   ToolsDir d,
   HostOs os, {
+  String? ffmpeg,
   void Function(String line)? onLine,
 }) async {
-  final env = uvEnv(d);
+  final env = {
+    ...uvEnv(d),
+    if (ffmpeg != null) ...pathWithDir(p.dirname(ffmpeg), Platform.environment, os),
+  };
   await runLogged(
     uvPath,
     [
@@ -487,6 +502,6 @@ Future<void> installTools(
   if (after['audio-separator'] == null || after['model'] == null) {
     final uv = after['uv'];
     if (uv == null) throw StateError('uv is missing, cannot install audio-separator');
-    await installSeparator(uv, d, os, onLine: onLine);
+    await installSeparator(uv, d, os, ffmpeg: after['ffmpeg'], onLine: onLine);
   }
 }

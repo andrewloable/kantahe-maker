@@ -949,6 +949,32 @@ echo wav > "$out/x_(Vocals)_m.wav"
       expect(loudnessOf('${work.path}/vocals.mp3'), lessThan(-50));
     }, skip: noShOrFfmpeg);
 
+    test('separate_puts_ffmpeg_on_path', () async {
+      // audio-separator runs the bare name ffmpeg, so its folder must be on PATH.
+      final sep = _fakeScript(
+        tmp.path,
+        'pathsep',
+        r'''
+echo "PATH=$PATH" >> __LOG__
+while [ $# -gt 0 ]; do if [ "$1" = "--output_dir" ]; then out="$2"; fi; shift; done
+cp "__I__" "$out/x_(Instrumental)_m.wav"
+cp "__V__" "$out/x_(Vocals)_m.wav"
+'''
+            .replaceAll('__LOG__', sepLog)
+            .replaceAll('__I__', dummy('a.wav'))
+            .replaceAll('__V__', dummy('b.wav')),
+      );
+      final ffmpeg = fakeFfmpeg();
+      final job = separate(
+        ToolPaths(ffmpeg: ffmpeg, ffprobe: 'x', separator: sep, modelDir: 'm'),
+        work,
+      );
+      await job.done;
+      expect(File(sepLog).readAsLinesSync(), [
+        startsWith('PATH=${File(ffmpeg).parent.path}:'),
+      ]);
+    }, skip: noSh);
+
     test('separate_runs_four_ffmpeg_calls_in_order', () async {
       final job = separate(
         ToolPaths(

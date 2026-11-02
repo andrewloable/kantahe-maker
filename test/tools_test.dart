@@ -626,6 +626,29 @@ void main() {
     }, skip: noSh);
   });
 
+  group('pathWithDir', () {
+    test('path_with_dir_prepends', () {
+      expect(pathWithDir('/x/bin', {'PATH': '/a:/b'}, HostOs.linux), {
+        'PATH': '/x/bin:/a:/b',
+      });
+    });
+
+    test('path_with_dir_without_path', () {
+      expect(pathWithDir('/x/bin', {'HOME': '/h'}, HostOs.macos), {
+        'PATH': '/x/bin',
+      });
+      expect(pathWithDir('/x/bin', {'PATH': ''}, HostOs.macos), {
+        'PATH': '/x/bin',
+      });
+    });
+
+    test('path_with_dir_windows_keeps_key', () {
+      expect(pathWithDir(r'C:\t\bin', {'Path': r'C:\a'}, HostOs.windows), {
+        'Path': r'C:\t\bin;C:\a',
+      });
+    });
+  });
+
   group('installSeparator', () {
     late Directory tmp;
     late ToolsDir tools;
@@ -648,6 +671,36 @@ void main() {
         'sep --download_model_only --model_filename $separatorModel '
             '--model_file_dir ${tools.models}',
       ]);
+    }, skip: noSh);
+
+    test('install_separator_puts_ffmpeg_on_path', () async {
+      // audio-separator runs the bare name ffmpeg, so its folder must be on PATH.
+      final uv = _script(
+        tmp.path,
+        'uv',
+        r'''
+echo "uv PATH=$PATH" >> __LOG__
+mkdir -p "$UV_TOOL_BIN_DIR"
+cat > "$UV_TOOL_BIN_DIR/audio-separator" <<'EOS'
+#!/bin/sh
+echo "sep PATH=$PATH" >> __LOG__
+mkdir -p "$5"
+echo model > "$5/$3"
+EOS
+chmod +x "$UV_TOOL_BIN_DIR/audio-separator"
+'''
+            .replaceAll('__LOG__', log.path),
+      );
+      await installSeparator(
+        uv,
+        tools,
+        HostOs.linux,
+        ffmpeg: '/some/ffmpeg-dir/ffmpeg',
+      );
+      final lines = log.readAsLinesSync();
+      expect(lines, hasLength(2));
+      expect(lines[0], startsWith('uv PATH=/some/ffmpeg-dir:'));
+      expect(lines[1], startsWith('sep PATH=/some/ffmpeg-dir:'));
     }, skip: noSh);
 
     test('install_separator_uv_failure', () async {
@@ -775,7 +828,7 @@ void main() {
         'ffmpeg-x/bin/ffmpeg': 'FF',
         'ffmpeg-x/bin/ffprobe': 'FP',
       });
-      final b = tarGz({'uv-x/uv': '#!/bin/sh\n${_fakeUv(log.path)}'});
+      final b = tarGz({'uv-x/uv': '#!/bin/sh\n${_fakeUv(log.path, pathFile: '${tmp.path}/uv-path.txt')}'});
       server = await _Server.start({
         '/a.tar.gz': a,
         '/b.tar.gz': b,
@@ -804,6 +857,15 @@ void main() {
       extraDirs: extra,
       downloads: downloads,
     );
+
+    test('install_tools_puts_the_ffmpeg_folder_on_the_path_of_uv', () async {
+      await install();
+      expect(
+        File('${tmp.path}/uv-path.txt').readAsStringSync(),
+        startsWith('${tools.bin}:'),
+        reason: 'the downloaded ffmpeg is in the tools folder',
+      );
+    }, skip: noSh);
 
     test('install_tools_end_to_end', () async {
       final progress = <String>{};
@@ -893,9 +955,10 @@ String _script(String dir, String name, String body) {
 /// Body of a fake uv: logs its arguments and "installs" a fake audio-separator that
 /// logs its own arguments and creates the model file (argument 3) in the folder
 /// given as argument 5.
-String _fakeUv(String log, {bool checkEnv = false}) =>
+String _fakeUv(String log, {bool checkEnv = false, String? pathFile}) =>
     r'''
 echo "uv $*" >> __LOG__
+__PATHLOG__
 __CHECK__
 mkdir -p "$UV_TOOL_BIN_DIR"
 cat > "$UV_TOOL_BIN_DIR/audio-separator" <<'EOS'
@@ -907,6 +970,7 @@ EOS
 chmod +x "$UV_TOOL_BIN_DIR/audio-separator"
 '''
         .replaceAll('__LOG__', log)
+        .replaceAll('__PATHLOG__', pathFile == null ? '' : 'echo "\$PATH" > $pathFile')
         .replaceAll(
           '__CHECK__',
           checkEnv

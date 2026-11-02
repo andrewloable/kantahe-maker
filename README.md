@@ -82,6 +82,8 @@ Nothing else leaves your computer. There is no account.
 
 **Light and dark?** The app follows your computer's setting.
 
+**Does it work with a screen reader?** No. The Flutter engine the app is built on can crash on macOS when a screen reader (or another tool that reads the screen) is running, so the app does not offer its contents to them.
+
 <img src="docs/screenshots/07-timing-dark.png" alt="The timing step in the dark theme" width="600">
 
 ## For developers

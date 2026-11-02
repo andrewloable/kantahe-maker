@@ -355,12 +355,21 @@ class SeparationJob implements CancellableJob {
     if (running != null) unawaited(_killTree(running, _killGrace));
   }
 
+  /// PATH with ffmpeg's folder first: audio-separator runs the bare name ffmpeg. Null when
+  /// the ffmpeg path has no folder.
+  Map<String, String>? get _environment {
+    final dir = p.dirname(_t.ffmpeg);
+    return dir == '.'
+        ? null
+        : pathWithDir(dir, Platform.environment, parseHost(Platform.version).$1);
+  }
+
   /// Runs a program. With [collect] its output lines are gathered there instead of
   /// being passed to the progress line.
   Future<void> _exec(String exe, List<String> args, {List<String>? collect}) async {
     if (_cancelled) throw const SeparationCancelled();
     try {
-      await runLogged(exe, args, onLine: collect?.add ?? _onLine, onStart: (proc) {
+      await runLogged(exe, args, environment: _environment, onLine: collect?.add ?? _onLine, onStart: (proc) {
         _current = proc;
         // cancel() may have come while the program was starting.
         if (_cancelled) unawaited(_killTree(proc, _killGrace));

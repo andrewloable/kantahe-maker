@@ -26,6 +26,29 @@ void main() {
     expect(find.text('New song'), findsNothing);
   });
 
+  // The Flutter macOS engine crashes in its accessibility code when a screen reader (or any
+  // tool that reads the screen) is active, so the app offers no semantics tree.
+  testWidgets('app_has_no_semantics_tree', (tester) async {
+    final handle = tester.ensureSemantics();
+    await tester.pumpWidget(
+      const KantaheApp(
+        home: Scaffold(
+          body: Column(
+            children: [Text('hello'), TextField(decoration: InputDecoration(labelText: 'name'))],
+          ),
+        ),
+      ),
+    );
+    expect(find.semantics.byLabel('hello'), findsNothing);
+    expect(find.semantics.byLabel('name'), findsNothing);
+    handle.dispose();
+  });
+
+  testWidgets('app_with_no_semantics_still_shows_its_text', (tester) async {
+    await tester.pumpWidget(const KantaheApp(home: Text('hello')));
+    expect(find.text('hello'), findsOneWidget);
+  });
+
   testWidgets('exit_request_cancels_running_jobs_first', (tester) async {
     final job = _Job();
     jobs.track(job);

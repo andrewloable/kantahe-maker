@@ -35,6 +35,9 @@ Future<void> _open(WidgetTester tester) async {
   await tester.pumpAndSettle();
 }
 
+const _installText = 'Installing Python, audio-separator and the vocal-removal model. '
+    'This can take several minutes.';
+
 void main() {
   group('toolItems', () {
     test('items_for_mac', () {
@@ -144,10 +147,8 @@ void main() {
     await tester.tap(find.text('Download'));
     await tester.pump();
     await tester.pump();
-    expect(find.text('uv.tar.gz'), findsOneWidget);
     expect(find.text('Downloading python'), findsOneWidget);
-    final bar = tester.widget<LinearProgressIndicator>(find.byType(LinearProgressIndicator));
-    expect(bar.value, 0.5);
+    expect(find.text(_installText), findsOneWidget);
     expect(find.text('Not now'), findsNothing, reason: 'cannot cancel mid-install');
     expect(find.text('Download'), findsNothing);
     finish.complete();
@@ -174,6 +175,114 @@ void main() {
         isNull);
     finish.complete();
     await tester.pumpAndSettle();
+  });
+
+  group('working label', () {
+    late void Function(String) line;
+    late void Function(String, int, int?) progress;
+    late Completer<void> finish;
+
+    /// Opens the dialog, clicks Download and keeps the callbacks of the running install.
+    Future<void> working(WidgetTester tester) async {
+      final run = _Run();
+      finish = Completer<void>();
+      await tester.pumpWidget(_app(
+          run,
+          (ctx) => ensureTools(ctx,
+              resolve: () async => finish.isCompleted ? _paths : null,
+              install: (onLine, onProgress) async {
+                line = onLine;
+                progress = onProgress;
+                await finish.future;
+              })));
+      await _open(tester);
+      await tester.tap(find.text('Download'));
+      await tester.pump();
+      await tester.pump();
+    }
+
+    LinearProgressIndicator bar(WidgetTester tester) =>
+        tester.widget<LinearProgressIndicator>(find.byType(LinearProgressIndicator));
+
+    testWidgets('starting_text_before_anything', (tester) async {
+      await working(tester);
+      expect(find.text('Starting...'), findsOneWidget);
+      finish.complete();
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('working_label_names_the_file', (tester) async {
+      await working(tester);
+      progress('a.tar.gz', 5, 10);
+      await tester.pump();
+      expect(find.text('Downloading a.tar.gz'), findsOneWidget);
+      expect(find.text('Starting...'), findsNothing);
+      expect(bar(tester).value, 0.5);
+      finish.complete();
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('stale_file_is_replaced_when_installing', (tester) async {
+      await working(tester);
+      progress('uv.tar.gz', 10, 10);
+      await tester.pump();
+      line('Downloaded numpy');
+      await tester.pump();
+      expect(find.textContaining('uv.tar.gz'), findsNothing);
+      expect(find.text(_installText), findsOneWidget);
+      expect(bar(tester).value, isNull);
+      expect(find.text('Downloaded numpy'), findsOneWidget);
+      finish.complete();
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('progress_after_a_line_goes_back_to_downloading', (tester) async {
+      await working(tester);
+      line('something');
+      await tester.pump();
+      progress('b.zip', 1, 2);
+      await tester.pump();
+      expect(find.text('Downloading b.zip'), findsOneWidget);
+      expect(find.text(_installText), findsNothing);
+      expect(bar(tester).value, 0.5);
+      finish.complete();
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('title_changes_while_working', (tester) async {
+      await working(tester);
+      expect(find.text('Downloading required tools'), findsOneWidget);
+      expect(find.text('Download required tools?'), findsNothing);
+      finish.complete();
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('retry_starts_again_with_the_starting_text', (tester) async {
+      final run = _Run();
+      var first = true;
+      await tester.pumpWidget(_app(
+          run,
+          (ctx) => ensureTools(ctx,
+              resolve: () async => null,
+              install: (onLine, onProgress) async {
+                if (first) {
+                  first = false;
+                  onProgress('x.zip', 1, 2);
+                  onLine('Downloaded numpy');
+                  throw Exception('boom');
+                }
+                await Completer<void>().future;
+              })));
+      await _open(tester);
+      await tester.tap(find.text('Download'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('boom'), findsOneWidget);
+      await tester.tap(find.text('Retry'));
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('Starting...'), findsOneWidget);
+      expect(find.textContaining('x.zip'), findsNothing);
+    });
   });
 
   testWidgets('download_error_retry', (tester) async {
