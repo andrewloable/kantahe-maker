@@ -36,6 +36,13 @@ List<int> tagged(
   ];
 }
 
+/// An ID3v2.4 tag with [body] bytes of padding, as a tagger writes it (the size is syncsafe).
+List<int> id3Tag(int body) => [
+  ...'ID3'.codeUnits, 4, 0, 0,
+  body >> 21 & 0x7F, body >> 14 & 0x7F, body >> 7 & 0x7F, body & 0x7F,
+  ...List.filled(body, 0),
+];
+
 void main() {
   test('mp3_info_128', () {
     final i = readMp3Info(withHeader([0xFF, 0xFB, 0x90, 0x00]))!;
@@ -60,6 +67,70 @@ void main() {
     ];
     final i = readMp3Info(withHeader([0xFF, 0xFB, 0xB0, 0x00], before: tag))!;
     expect(i.kbps, 192);
+  });
+
+  test('mp3_info_skips_stacked_id3_tags', () {
+    // spotsaver.net sends two tags one after the other: the second one is not audio.
+    final bytes = withHeader([0xFF, 0xFB, 0xE0, 0x64], before: [...id3Tag(300), ...id3Tag(50)]);
+    final i = readMp3Info(bytes)!;
+    expect((i.kbps, i.hertz, i.channels), (320, 44100, 2));
+    expect(readMp3Info([...id3Tag(300), ...id3Tag(50)]), isNull, reason: 'tags only, no audio');
+  });
+
+  group('readMp3Head', () {
+    late Directory tmp;
+    setUp(() => tmp = Directory.systemTemp.createTempSync('mp3_head'));
+    tearDown(() => tmp.deleteSync(recursive: true));
+
+    File mp3(List<int> bytes) => File('${tmp.path}/x.mp3')..writeAsBytesSync(bytes);
+    List<int> head(File f) {
+      final r = f.openSync();
+      try {
+        return readMp3Head(r);
+      } finally {
+        r.closeSync();
+      }
+    }
+
+    // The song that failed: a 65,683 byte tag (cover art) and a second tag, so the first
+    // frame starts at byte 65,870, after the 64 KB a plain read gets.
+    final failing = [
+      ...id3Tag(65673),
+      ...id3Tag(177),
+      ...tagged([0xFF, 0xFB, 0xE0, 0x64], tag: 'Info', frames: 1000, bytes: 1044898), // 320 kbps
+      ...List.filled(20000, 7),
+    ];
+
+    test('a_plain_64_kb_read_misses_the_audio', () {
+      expect(failing.length, greaterThan(65870));
+      expect(readMp3Info(failing.sublist(0, 64 * 1024)), isNull);
+    });
+
+    test('reads_past_big_and_stacked_tags', () {
+      final bytes = head(mp3(failing));
+      final i = readMp3Info(bytes)!;
+      expect((i.kbps, i.hertz, i.channels), (320, 44100, 2));
+      expect(bytes.length, lessThan(failing.length), reason: 'not the whole file');
+    });
+
+    test('seconds_of_a_file_with_big_tags', () async {
+      final f = mp3(failing);
+      expect(await mp3FileSeconds(f.path), closeTo(1000 * 1152 / 44100, 0.001));
+    });
+
+    test('a_file_without_tags_or_a_tiny_file', () {
+      final plain = withHeader([0xFF, 0xFB, 0x90, 0x00]);
+      expect(readMp3Info(head(mp3(plain)))!.kbps, 128);
+      expect(head(mp3([1, 2, 3])), [1, 2, 3]);
+      expect(head(mp3(<int>[])), isEmpty);
+    });
+
+    test('a_tag_that_claims_too_much_is_bounded', () {
+      // Size field 0x7F7F7F7F ~ 256 MB on a 100 byte file: no huge read, no crash.
+      final liar = [...'ID3'.codeUnits, 4, 0, 0, 0x7F, 0x7F, 0x7F, 0x7F, ...List.filled(90, 0)];
+      expect(head(mp3(liar)).length, liar.length);
+      expect(readMp3Info(head(mp3(liar))), isNull);
+    });
   });
 
   test('mp3_info_other_sampling_rates', () {

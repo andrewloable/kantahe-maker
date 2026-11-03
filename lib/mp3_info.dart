@@ -21,7 +21,7 @@ class Mp3Info {
 }
 
 /// The bitrate, sampling rate and channels in the first MPEG-1 Layer III frame header of
-/// [bytes] (after an ID3v2 tag, if any), or null when there is none. A Xing or Info tag after
+/// [bytes] (after the ID3v2 tags, if any), or null when there is none. A Xing or Info tag after
 /// the header with both its counts gives the bitrate of the stream instead, because the frame
 /// that holds the tag may have a larger bitrate than the audio (ffmpeg does that when the
 /// tag does not fit): Xing means variable bitrate, and the average is given; Info means
@@ -43,13 +43,13 @@ double? mp3Seconds(List<int> head, int fileLength) {
   return audioBytes * 8 / (found.info.kbps * 1000);
 }
 
-/// [mp3Seconds] of the file at [path], read from its first 64 KB; null when it cannot be
+/// [mp3Seconds] of the file at [path], read with [readMp3Head]; null when it cannot be
 /// read or is no MP3.
 Future<double?> mp3FileSeconds(String path) async {
   try {
     final reader = await File(path).open();
     try {
-      return mp3Seconds(await reader.read(64 * 1024), await reader.length());
+      return mp3Seconds(readMp3Head(reader), await reader.length());
     } finally {
       await reader.close();
     }
@@ -58,20 +58,50 @@ Future<double?> mp3FileSeconds(String path) async {
   }
 }
 
+/// How many bytes the ID3v2 tag at [at] takes, header and footer included, or null when
+/// there is no tag there.
+int? _id3Length(List<int> bytes, int at) {
+  if (at + 10 > bytes.length ||
+      bytes[at] != 0x49 || // "ID3"
+      bytes[at + 1] != 0x44 ||
+      bytes[at + 2] != 0x33) {
+    return null;
+  }
+  // Four "syncsafe" bytes: 7 bits each. A footer (flag 0x10) adds 10 more bytes.
+  final size = (bytes[at + 6] & 0x7F) << 21 |
+      (bytes[at + 7] & 0x7F) << 14 |
+      (bytes[at + 8] & 0x7F) << 7 |
+      (bytes[at + 9] & 0x7F);
+  return 10 + size + ((bytes[at + 5] & 0x10) != 0 ? 10 : 0);
+}
+
+/// The bytes at the start of [file] that [readMp3Info] and [mp3Seconds] need: all of its ID3v2
+/// tags and the first frame after them. The tags can be much larger than 64 KB (cover art), and
+/// some files have more than one; at least the first 64 KB are read.
+List<int> readMp3Head(RandomAccessFile file) {
+  const most = 16 * 1024 * 1024; // ponytail: a tag claiming more than this is not read
+  var end = 0;
+  for (var i = 0; i < 8; i++) {
+    file.setPositionSync(end);
+    final length = _id3Length(file.readSync(10), 0);
+    if (length == null) break;
+    end += length;
+    if (end > most) {
+      end = most;
+      break;
+    }
+  }
+  file.setPositionSync(0);
+  return file.readSync(end + 8192 > 64 * 1024 ? end + 8192 : 64 * 1024);
+}
+
 /// The first frame of [bytes]: where it starts, what it says about itself, and the frame
 /// count of its Xing or Info tag (null without one).
 ({int start, Mp3Info info, int? frames})? _scan(List<int> bytes) {
   var start = 0;
-  if (bytes.length >= 10 &&
-      bytes[0] == 0x49 && // "ID3"
-      bytes[1] == 0x44 &&
-      bytes[2] == 0x33) {
-    // Four "syncsafe" bytes: 7 bits each. A footer (flag 0x10) adds 10 more bytes.
-    final size = (bytes[6] & 0x7F) << 21 |
-        (bytes[7] & 0x7F) << 14 |
-        (bytes[8] & 0x7F) << 7 |
-        (bytes[9] & 0x7F);
-    start = 10 + size + ((bytes[5] & 0x10) != 0 ? 10 : 0);
+  // A file may hold several ID3v2 tags one after the other.
+  for (var tag = _id3Length(bytes, 0); tag != null; tag = _id3Length(bytes, start)) {
+    start += tag;
   }
   // A few bytes of padding may sit between the tag and the first frame.
   for (var i = start; i + 4 <= bytes.length && i < start + 4096; i++) {

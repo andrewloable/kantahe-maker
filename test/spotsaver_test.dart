@@ -12,6 +12,16 @@ import 'support/process.dart';
 /// A tiny file that is an MP3 as far as readMp3Info can tell (a 128 kbps frame header).
 final tinyMp3 = [0xFF, 0xFB, 0x90, 0x00, ...List.filled(1996, 7)];
 
+/// An ID3v2.4 tag with [body] bytes after its header.
+List<int> id3Tag(int body) => [
+  ...'ID3'.codeUnits, 4, 0, 0,
+  body >> 21 & 0x7F, body >> 14 & 0x7F, body >> 7 & 0x7F, body & 0x7F,
+  ...List.filled(body, 0),
+];
+
+/// What spotsaver.net sent for one song: cover art in a tag over 64 KB, a second tag, then audio.
+final bigTagMp3 = [...id3Tag(65673), ...id3Tag(177), ...tinyMp3];
+
 /// A browser to test with: KANTAHE_TEST_BROWSER, else one installed in the usual place.
 String? testBrowser() {
   final named = Platform.environment['KANTAHE_TEST_BROWSER'];
@@ -31,7 +41,7 @@ final noBrowser = browser == null
 class FakeSite {
   FakeSite(this.mode);
 
-  /// ok, html (the file is a web page), failed, slow (never finishes converting), nobox,
+  /// ok, bigtag (the MP3 starts with two ID3 tags, 65,870 bytes), html (the file is a web page), failed, slow (never finishes converting), nobox,
   /// nobutton, late (the first load of the home page is not ready for the form for 2.5 s:
   /// a submit before that is a plain page load, as on a real page that is not hydrated yet).
   final String mode;
@@ -123,7 +133,7 @@ b.addEventListener('click', function () {
           } else {
             r.headers.contentType = ContentType('audio', 'mpeg');
             r.headers.set('Content-Disposition', 'attachment; filename="x.mp3"');
-            r.add(tinyMp3);
+            r.add(mode == 'bigtag' ? bigTagMp3 : tinyMp3);
           }
         default:
           r.statusCode = 404;
@@ -262,6 +272,14 @@ void main() {
       expect(site.links, [link]);
       expect(site.homeLoads, greaterThan(1), reason: 'the first submit reloaded the page');
       expect(logs.join('\n'), contains('still on the start page, sending the link again'));
+      expectBrowserGone();
+    }, skip: noBrowser, timeout: const Timeout(Duration(seconds: 90)));
+
+    test('an_mp3_whose_tags_are_longer_than_64_kb_is_accepted', () async {
+      await startSite('bigtag');
+      final file = await run();
+      expect(file.readAsBytesSync(), bigTagMp3);
+      expect(logs.join('\n'), contains('file: ${bigTagMp3.length} bytes, MP3, 44.1 kHz, 128 kbps'));
       expectBrowserGone();
     }, skip: noBrowser, timeout: const Timeout(Duration(seconds: 90)));
 

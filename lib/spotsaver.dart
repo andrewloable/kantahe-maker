@@ -381,7 +381,7 @@ Future<File> downloadWithSpotsaver(
     }
     final length = received.lengthSync();
     final reader = received.openSync();
-    final head = reader.readSync(64 * 1024);
+    final head = readMp3Head(reader);
     reader.closeSync();
     final info = readMp3Info(head);
     log('file: $length bytes, ${info == null ? 'not an MP3' : describeMp3(info, withChannels: true)}');
