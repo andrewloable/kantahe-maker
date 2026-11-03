@@ -3,6 +3,8 @@
 // average from the Xing tag. Used to describe the MP3s in the .nfo as they really are.
 // Pure Dart: no Flutter imports.
 
+import 'dart:io';
+
 class Mp3Info {
   /// The bitrate of the first frame header, or the average when [variable].
   final int kbps, hertz, channels;
@@ -24,7 +26,41 @@ class Mp3Info {
 /// that holds the tag may have a larger bitrate than the audio (ffmpeg does that when the
 /// tag does not fit): Xing means variable bitrate, and the average is given; Info means
 /// constant bitrate, and the nearest standard bitrate is given. Never throws.
-Mp3Info? readMp3Info(List<int> bytes) {
+Mp3Info? readMp3Info(List<int> bytes) => _scan(bytes)?.info;
+
+/// How long the MP3 is, in seconds, from its first [head] bytes (at least the first 64 KB,
+/// or the whole file when smaller) and the size of the whole file, [fileLength]. A Xing or
+/// Info tag with a frame count gives it exactly (1152 samples per frame); otherwise it is
+/// estimated from the first frame's bitrate and the bytes after the ID3v2 tag. Null when
+/// [head] holds no MP3 frame. Never throws.
+double? mp3Seconds(List<int> head, int fileLength) {
+  final found = _scan(head);
+  if (found == null) return null;
+  final frames = found.frames;
+  if (frames != null) return frames * 1152 / found.info.hertz;
+  final audioBytes = fileLength - found.start;
+  if (audioBytes <= 0) return null;
+  return audioBytes * 8 / (found.info.kbps * 1000);
+}
+
+/// [mp3Seconds] of the file at [path], read from its first 64 KB; null when it cannot be
+/// read or is no MP3.
+Future<double?> mp3FileSeconds(String path) async {
+  try {
+    final reader = await File(path).open();
+    try {
+      return mp3Seconds(await reader.read(64 * 1024), await reader.length());
+    } finally {
+      await reader.close();
+    }
+  } catch (_) {
+    return null;
+  }
+}
+
+/// The first frame of [bytes]: where it starts, what it says about itself, and the frame
+/// count of its Xing or Info tag (null without one).
+({int start, Mp3Info info, int? frames})? _scan(List<int> bytes) {
   var start = 0;
   if (bytes.length >= 10 &&
       bytes[0] == 0x49 && // "ID3"
@@ -50,11 +86,15 @@ Mp3Info? readMp3Info(List<int> bytes) {
       i + 4 + ((bytes[i + 1] & 1) == 0 ? 2 : 0) + (mono ? 17 : 32),
       hertz,
     );
-    return Mp3Info(
-      kbps: tag == null ? kbps : (tag.variable ? tag.kbps : _nearestStandard(tag.kbps)),
-      hertz: hertz,
-      channels: mono ? 1 : 2,
-      variable: tag?.variable ?? false,
+    return (
+      start: i,
+      info: Mp3Info(
+        kbps: tag == null ? kbps : (tag.variable ? tag.kbps : _nearestStandard(tag.kbps)),
+        hertz: hertz,
+        channels: mono ? 1 : 2,
+        variable: tag?.variable ?? false,
+      ),
+      frames: tag?.frames,
     );
   }
   return null;
@@ -63,7 +103,7 @@ Mp3Info? readMp3Info(List<int> bytes) {
 /// The average kbps from a Xing or Info tag at [at] and whether it is a Xing (variable
 /// bitrate) one, or null when there is no tag, it lacks the frame or byte count, or [bytes]
 /// ends inside it. One MPEG-1 Layer III frame is 1152 samples.
-({int kbps, bool variable})? _tagAverage(List<int> bytes, int at, int hertz) {
+({int kbps, bool variable, int frames})? _tagAverage(List<int> bytes, int at, int hertz) {
   if (at + 8 > bytes.length) return null;
   final name = String.fromCharCodes(bytes.sublist(at, at + 4));
   if (name != 'Xing' && name != 'Info') return null;
@@ -71,7 +111,11 @@ Mp3Info? readMp3Info(List<int> bytes) {
   if (flags & 3 != 3 || at + 16 > bytes.length) return null;
   final frames = _u32(bytes, at + 8), size = _u32(bytes, at + 12);
   if (frames == 0 || size == 0) return null;
-  return (kbps: (size * 8 * hertz / (frames * 1152 * 1000)).round(), variable: name == 'Xing');
+  return (
+    kbps: (size * 8 * hertz / (frames * 1152 * 1000)).round(),
+    variable: name == 'Xing',
+    frames: frames,
+  );
 }
 
 /// The standard MPEG-1 Layer III bitrate closest to [kbps].

@@ -6,12 +6,14 @@ import 'package:archive/archive.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:kantahe_maker/autofill.dart';
 import 'package:kantahe_maker/jobs.dart';
 import 'package:kantahe_maker/karmp3.dart' show karMp3Name;
 import 'package:kantahe_maker/lyrics_lookup.dart';
 import 'package:kantahe_maker/screens/lyrics_search_panel.dart';
 import 'package:kantahe_maker/screens/song_info_panel.dart';
 import 'package:kantahe_maker/song_info.dart';
+import 'package:kantahe_maker/spotify_link.dart';
 import 'package:kantahe_maker/pipeline.dart';
 import 'package:kantahe_maker/project.dart';
 import 'package:kantahe_maker/screens/song_screen.dart';
@@ -105,17 +107,21 @@ Future<Song> pumpSong(
   String? corruptJson,
   bool toolsAvailable = true,
   Object? importError,
+  Object? durationError,
   LyricsFinder? lyricsFinder,
   Completer<void>? importGate,
   SongInfoFinder? songInfoFinder,
   Future<({String composer, String lyricist})> Function(String)?
   songInfoDetailsFn,
   Future<({String title, String artist})> Function(ToolPaths, String)? tagsFn,
+  Future<SpotifyTrack> Function(String)? spotifyFinder,
+  Future<AutofillResult> Function(SpotifyTrack, Future<double?>)? autofill,
   bool onTopOfHome = false,
 }) async {
   final s = Song()
     ..toolsResult = toolsAvailable ? fakeTools : null
-    ..importError = importError;
+    ..importError = importError
+    ..durationError = durationError;
   s.root = Directory.systemTemp.createTempSync('song_test');
   addTearDown(() => deleteTemp(s.root));
   s.dir = Directory('${s.root.path}/20260101-000000');
@@ -178,6 +184,11 @@ Future<Song> pumpSong(
     songInfoDetailsFn:
         songInfoDetailsFn ?? (id) async => (composer: '', lyricist: ''),
     tagsFn: tagsFn ?? (tools, input) async => (title: '', artist: ''),
+    // Never the real open.spotify.com, musicbrainz.org or lrclib.net either.
+    spotifyFinder:
+        spotifyFinder ?? (link) async => throw StateError('no network in tests'),
+    autofill:
+        autofill ?? (track, audio) async => throw StateError('no network in tests'),
   );
   await tester.pumpWidget(
     onTopOfHome
@@ -282,7 +293,10 @@ void main() {
       expect(s.imports, ['/x/in.mp4']);
       await goTo(tester, WizardStep.vocals);
       s.sep.finish();
-      await settle(tester, until: () => shown('Vocal splitting finished'));
+      // Whoever waits on this step is moved on; the result is still shown on the step.
+      await settle(tester, until: () => jobs.length == 0);
+      await goTo(tester, WizardStep.vocals);
+      expect(shown('Vocal splitting finished'), isTrue);
     });
 
     testWidgets('import_then_separation_flow', (tester) async {
@@ -310,7 +324,10 @@ void main() {
         reason: 'the last output line',
       );
       s.sep.finish();
-      await settle(tester, until: () => shown('Vocal splitting finished'));
+      // The user was waiting on this step, so the screen moves on (here: to Timing).
+      await settle(tester, until: () => find.byType(TapScreen).evaluate().isNotEmpty);
+      await goTo(tester, WizardStep.vocals);
+      expect(shown('Vocal splitting finished'), isTrue);
       expect(find.text('Cancel'), findsNothing);
       expect(File('${s.dir.path}/instrumental.mp3').existsSync(), isTrue);
     });
@@ -335,7 +352,10 @@ void main() {
       await settle(tester, until: () => s.seps.isNotEmpty);
       expect(s.imports, isEmpty);
       s.sep.finish();
-      await settle(tester, until: () => shown('Vocal splitting finished'));
+      // Whoever waits on this step is moved on; the result is still shown on the step.
+      await settle(tester, until: () => jobs.length == 0);
+      await goTo(tester, WizardStep.vocals);
+      expect(shown('Vocal splitting finished'), isTrue);
     });
 
     testWidgets('import_failure_shows_the_message_and_retry_works', (
@@ -355,7 +375,10 @@ void main() {
       expect(s.imports, hasLength(2));
       await goTo(tester, WizardStep.vocals);
       s.sep.finish();
-      await settle(tester, until: () => shown('Vocal splitting finished'));
+      // Whoever waits on this step is moved on; the result is still shown on the step.
+      await settle(tester, until: () => jobs.length == 0);
+      await goTo(tester, WizardStep.vocals);
+      expect(shown('Vocal splitting finished'), isTrue);
     });
 
     testWidgets('separation_failure_shows_the_error_and_retry_starts_again', (
@@ -371,7 +394,10 @@ void main() {
       await settle(tester, until: () => s.seps.length == 2);
       expect(shown('Splitting vocals'), isTrue);
       s.sep.finish();
-      await settle(tester, until: () => shown('Vocal splitting finished'));
+      // Whoever waits on this step is moved on; the result is still shown on the step.
+      await settle(tester, until: () => jobs.length == 0);
+      await goTo(tester, WizardStep.vocals);
+      expect(shown('Vocal splitting finished'), isTrue);
     });
 
     testWidgets('cancel_button_stops_the_job_and_start_again_runs_a_new_one', (
@@ -391,7 +417,10 @@ void main() {
         reason: 'the song is not read a second time',
       );
       s.sep.finish();
-      await settle(tester, until: () => shown('Vocal splitting finished'));
+      // Whoever waits on this step is moved on; the result is still shown on the step.
+      await settle(tester, until: () => jobs.length == 0);
+      await goTo(tester, WizardStep.vocals);
+      expect(shown('Vocal splitting finished'), isTrue);
     });
 
     testWidgets(
@@ -1116,6 +1145,61 @@ void main() {
       );
     });
 
+    testWidgets('lyrics_ranked_by_audio_length', (tester) async {
+      LyricsCandidate version(double seconds) => LyricsCandidate(
+        title: 'T',
+        artist: 'A',
+        album: '',
+        lyrics: 'la la',
+        seconds: seconds,
+      );
+      // The fake audio is 61.4 s long (Song.duration).
+      final s = await pumpSong(
+        tester,
+        configure: named,
+        source: true,
+        lyricsFinder: (t, a) async => [version(300), version(62)],
+      );
+      await settle(tester, until: () => s.seps.isNotEmpty);
+      await goTo(tester, WizardStep.lyrics);
+      await settle(tester, until: () => find.byKey(const ValueKey('lyrics-result-0')).evaluate().isNotEmpty);
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('lyrics-result-0')),
+          matching: find.textContaining('1:02'),
+        ),
+        findsOneWidget,
+      );
+      expect(s.durationFiles, [endsWith('source.mp3')]);
+    });
+
+    testWidgets('lyrics_unranked_when_length_unknown', (tester) async {
+      LyricsCandidate version(double seconds) => LyricsCandidate(
+        title: 'T',
+        artist: 'A',
+        album: '',
+        lyrics: 'la la',
+        seconds: seconds,
+      );
+      final s = await pumpSong(
+        tester,
+        configure: named,
+        source: true,
+        durationError: StateError('no ffprobe'),
+        lyricsFinder: (t, a) async => [version(300), version(62)],
+      );
+      await settle(tester, until: () => s.seps.isNotEmpty);
+      await goTo(tester, WizardStep.lyrics);
+      await settle(tester, until: () => find.byKey(const ValueKey('lyrics-result-0')).evaluate().isNotEmpty);
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('lyrics-result-0')),
+          matching: find.textContaining('5:00'),
+        ),
+        findsOneWidget,
+      );
+    });
+
     testWidgets('lyrics_step_does_not_search_when_there_are_lyrics', (
       tester,
     ) async {
@@ -1278,6 +1362,55 @@ void main() {
         until: () =>
             find.byKey(const ValueKey('vocals-status')).evaluate().isEmpty,
       );
+    });
+
+    testWidgets('moves_on_after_splitting', (tester) async {
+      final s = await pumpSong(
+        tester,
+        configure: tappedSong,
+        source: true,
+      );
+      await settle(tester, until: () => s.seps.isNotEmpty);
+      await goTo(tester, WizardStep.vocals);
+      expect(shown('Splitting vocals'), isTrue);
+      s.sep.finish();
+      await settle(
+        tester,
+        until: () => find.byKey(const ValueKey('export-name')).evaluate().isNotEmpty,
+      );
+      expect(find.byKey(const ValueKey('export-name')), findsOneWidget);
+    });
+
+    testWidgets('moves_to_lyrics_when_they_are_missing', (tester) async {
+      final s = await pumpSong(tester, configure: named, source: true);
+      await settle(tester, until: () => s.seps.isNotEmpty);
+      await goTo(tester, WizardStep.vocals);
+      s.sep.finish();
+      await settle(
+        tester,
+        until: () => find.byKey(const ValueKey('lyrics')).evaluate().isNotEmpty,
+      );
+      expect(find.byKey(const ValueKey('lyrics')), findsOneWidget);
+    });
+
+    testWidgets('stays_where_the_user_went', (tester) async {
+      final s = await pumpSong(tester, configure: tappedSong, source: true);
+      await settle(tester, until: () => s.seps.isNotEmpty);
+      await goTo(tester, WizardStep.details);
+      expect(find.byKey(const ValueKey('title')), findsOneWidget);
+      s.sep.finish();
+      await settle(tester, until: () => jobs.length == 0);
+      expect(find.byKey(const ValueKey('title')), findsOneWidget);
+      expect(find.byKey(const ValueKey('export-name')), findsNothing);
+    });
+
+    testWidgets('no_move_when_splitting_fails', (tester) async {
+      final s = await pumpSong(tester, configure: tappedSong, source: true);
+      await settle(tester, until: () => s.seps.isNotEmpty);
+      await goTo(tester, WizardStep.vocals);
+      s.sep.fail(StateError('boom'));
+      await settle(tester, until: () => shown('boom'));
+      expect(find.byKey(const ValueKey('export-name')), findsNothing);
     });
 
     testWidgets('separation_failure_shows_on_other_steps', (tester) async {
@@ -1715,6 +1848,215 @@ void main() {
       await tester.pump();
       expect(find.byKey(const ValueKey('vocals-missing')), findsNothing);
       expect(exportEnabled(tester), isTrue);
+    });
+  });
+
+  group('spotify link', () {
+    const link = 'https://open.spotify.com/track/4u7EnebtmKWzUH433cf5Qv?si=x1';
+    const track = SpotifyTrack(id: 'i', title: 'New', artist: 'Singer', seconds: 200);
+
+    AutofillResult result({
+      String composer = 'C',
+      String lyricist = 'L',
+      List<(double?, String)> lines = const [],
+      String timingSource = 'tapped',
+      String note = '',
+    }) => AutofillResult(
+      title: 'New',
+      artist: 'Singer',
+      composer: composer,
+      lyricist: lyricist,
+      lines: lines,
+      timingSource: timingSource,
+      note: note,
+    );
+
+    /// A song at the Details step with spotifyFinder and autofill recorded.
+    Future<
+      ({
+        Song song,
+        List<String> links,
+        List<double?> lengths,
+      })
+    >
+    pump(
+      WidgetTester tester, {
+      void Function(SongProject)? configure,
+      bool source = false,
+      AutofillResult? answer,
+      Object? finderError,
+    }) async {
+      final links = <String>[];
+      final lengths = <double?>[];
+      final s = await pumpSong(
+        tester,
+        configure: (p) {
+          named(p)
+            ..title = 'Old'
+            ..artist = 'Someone';
+          configure?.call(p);
+        },
+        source: source,
+        instrumental: source,
+        spotifyFinder: (l) async {
+          links.add(l);
+          if (finderError != null) throw finderError;
+          return track;
+        },
+        autofill: (t, audio) async {
+          lengths.add(await audio);
+          return answer ?? result();
+        },
+      );
+      await goTo(tester, WizardStep.details);
+      return (song: s, links: links, lengths: lengths);
+    }
+
+    Future<void> paste(WidgetTester tester, String text) async {
+      await typeInto(tester, 'spotify-link', text);
+      await tester.pump();
+    }
+
+    testWidgets('pasting_a_link_fills_details', (tester) async {
+      final r = await pump(tester);
+      await paste(tester, 'Listen: $link');
+      await settle(tester, until: () => r.song.json()['title'] == 'New');
+      expect(r.links, ['Listen: $link']);
+      expect(r.song.json()['artist'], 'Singer');
+      expect(r.song.json()['composer'], 'C');
+      expect(r.song.json()['lyricist'], 'L');
+      expect(
+        tester.widget<TextField>(find.byKey(const ValueKey('title'))).controller!.text,
+        'New',
+      );
+      expect(
+        tester.widget<TextField>(find.byKey(const ValueKey('artist'))).controller!.text,
+        'Singer',
+      );
+    });
+
+    testWidgets('typed_composer_is_kept', (tester) async {
+      final r = await pump(tester, configure: (p) => p.composer = 'Mine');
+      await paste(tester, link);
+      await settle(tester, until: () => r.song.json()['title'] == 'New');
+      expect(r.song.json()['composer'], 'Mine');
+      expect(r.song.json()['lyricist'], 'L');
+    });
+
+    testWidgets('timed_lyrics_fill_an_empty_box', (tester) async {
+      final r = await pump(
+        tester,
+        answer: result(
+          lines: const [(1.0, 'la la'), (2.5, 'na na')],
+          timingSource: 'lrclib',
+        ),
+      );
+      await paste(tester, link);
+      await settle(tester, until: () => r.song.json()['title'] == 'New');
+      final j = r.song.json();
+      expect(j['lyrics'], 'la la\nna na');
+      expect(j['times'], [1.0, 2.5]);
+      expect(j['timingSource'], 'lrclib');
+    });
+
+    testWidgets('plain_lyrics_fill_an_empty_box_untimed', (tester) async {
+      final r = await pump(
+        tester,
+        answer: result(lines: const [(null, 'la la'), (null, 'na na')]),
+      );
+      await paste(tester, link);
+      await settle(tester, until: () => r.song.json()['title'] == 'New');
+      final j = r.song.json();
+      expect(j['lyrics'], 'la la\nna na');
+      expect(j['times'], [null, null]);
+      expect(j['timingSource'], 'tapped');
+    });
+
+    testWidgets('existing_lyrics_are_kept', (tester) async {
+      final r = await pump(
+        tester,
+        configure: (p) => p.lyrics = 'my words',
+        answer: result(lines: const [(null, 'la la')]),
+      );
+      await paste(tester, link);
+      await settle(tester, until: () => r.song.json()['title'] == 'New');
+      expect(r.song.json()['lyrics'], 'my words');
+    });
+
+    testWidgets('the_note_is_shown', (tester) async {
+      final r = await pump(tester, answer: result(note: 'Tap the timing.'));
+      await paste(tester, link);
+      await settle(tester, until: () => r.song.json()['title'] == 'New');
+      expect(shown('Filled in from Spotify'), isTrue);
+      expect(shown('Tap the timing.'), isTrue);
+    });
+
+    testWidgets('audio_length_comes_from_source_mp3', (tester) async {
+      final r = await pump(tester, source: true);
+      // An MP3 whose Info tag says 1000 frames of 1152 samples at 44100 Hz (26.122 s).
+      List<int> u32(int v) => [v >> 24 & 255, v >> 16 & 255, v >> 8 & 255, v & 255];
+      File('${r.song.dir.path}/source.mp3').writeAsBytesSync([
+        0xFF, 0xFB, 0x70, 0x00, ...List.filled(32, 0),
+        ...'Info'.codeUnits, ...u32(3), ...u32(1000), ...u32(313000),
+        ...List.filled(100, 0),
+      ]);
+      await paste(tester, link);
+      await settle(tester, until: () => r.lengths.isNotEmpty);
+      expect(r.lengths.single, closeTo(26.122, 0.001));
+    });
+
+    testWidgets('length_unknown_without_a_source', (tester) async {
+      final r = await pump(tester);
+      await paste(tester, link);
+      await settle(tester, until: () => r.lengths.isNotEmpty);
+      expect(r.lengths.single, isNull);
+    });
+
+    testWidgets('error_shows_message', (tester) async {
+      final r = await pump(
+        tester,
+        finderError: const SpotifyLinkException('Spotify has no song with this link'),
+      );
+      await paste(tester, link);
+      await settle(
+        tester,
+        until: () => shown('Spotify: Spotify has no song with this link'),
+      );
+      expect(r.song.json()['title'], 'Old');
+      expect(r.song.json()['artist'], 'Someone');
+    });
+
+    testWidgets('text_without_a_link_does_nothing', (tester) async {
+      final r = await pump(tester);
+      await paste(tester, 'hello');
+      await tester.tap(find.byKey(const ValueKey('spotify-get')));
+      await tester.pump();
+      expect(r.links, isEmpty);
+      expect(r.song.json()['title'], 'Old');
+    });
+
+    testWidgets('same_text_is_not_run_again_by_itself', (tester) async {
+      final r = await pump(tester);
+      await paste(tester, link);
+      await settle(tester, until: () => r.song.json()['title'] == 'New');
+      await paste(tester, '$link ');
+      await paste(tester, link);
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(r.links, hasLength(1));
+      // The button runs it again by hand.
+      await tester.tap(find.byKey(const ValueKey('spotify-get')));
+      await settle(tester, until: () => r.links.length == 2);
+    });
+
+    testWidgets('the_link_is_not_saved', (tester) async {
+      final r = await pump(tester);
+      await paste(tester, link);
+      await settle(tester, until: () => r.song.json()['title'] == 'New');
+      expect(
+        r.song.json().keys.where((k) => k.toLowerCase().contains('spotify')),
+        isEmpty,
+      );
+      expect(readText(File('${r.song.dir.path}/project.json')), isNot(contains('4u7Eneb')));
     });
   });
 

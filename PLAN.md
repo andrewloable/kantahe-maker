@@ -23,6 +23,16 @@ Back, and Next. Next and the header only open a step once every step before it i
 Split vocals does not hold up the later steps while it runs. A reopened song opens on its
 first unfinished step.
 
+A **robot icon** next to **New song** starts a song from a Spotify link instead: a dialog asks for
+the link (prefilled from the clipboard when it holds one) and shows a notice that the audio is
+converted by spotsaver.net. lib/spotify_link.dart reads the title, artist and length;
+lib/spotsaver.dart (on lib/cdp.dart) drives spotsaver.net in a Chrome or Edge window that opens minimized for a few seconds and
+saves the MP3 in a temporary folder, while lib/autofill.dart looks up composer, lyricist and
+lyrics at the same time. Only when the audio exists is the song folder made (so a failure or a
+cancel leaves nothing behind); the song then opens and vocal splitting starts as for any other
+song. When the download fails the user may choose an MP3 file instead and keeps the details and
+lyrics.
+
 1. **Song**: shows the chosen file. ffmpeg writes `source.mp3` (a plain copy when the input is
    already MP3) and `source.wav` (44.1 kHz stereo, used for separation).
 2. **Split vocals**: runs in the background, so the user may go on to the next steps; a status
@@ -40,7 +50,12 @@ first unfinished step.
    and lists matches with album, year and length (when nothing is found and both are filled in,
    it searches once more with title and artist swapped, since the file name may be "Artist - Title"). Picking one sets the title and artist and
    fills composer and lyricist where they are blank (a work's "writer" counts as both). Only
-   the title and artist (or the file name) are sent, and the step says so.
+   the title and artist (or the file name) are sent, and the step says so. A pasted Spotify
+   song link (a box at the top of the step; lib/spotify_link.dart reads the track's title, artist
+   and length from open.spotify.com's embed page) starts lib/autofill.dart: it replaces the title
+   and artist, and fills composer, lyricist and the lyrics where those are blank, with the lyrics'
+   times only when the lrclib.net entry is within 2 s of the audio's own length. The audio always
+   comes from the user's file.
 4. **Lyrics**: searched on lrclib.net automatically when the step opens with an empty lyrics box
    (once per title and artist). When lrclib.net finds nothing, lyrics.ovh is asked (plain
    lyrics only); when both found nothing, the same two are tried once more with title and artist

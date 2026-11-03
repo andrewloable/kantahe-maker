@@ -170,7 +170,8 @@ void main() {
       return [first];
     });
     expect(find.text('down'), findsOneWidget);
-    await tapAndPump(tester, 'lyrics-retry');
+    expect(find.text('Try again'), findsNothing);
+    await tapAndPump(tester, 'lyrics-search');
     expect(find.text('Song One - Artist One'), findsOneWidget);
     expect(h.calls, hasLength(2));
   });

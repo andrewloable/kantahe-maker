@@ -157,17 +157,7 @@ class _LyricsSearchPanelState extends State<LyricsSearchPanel> {
           _Phase.error => [
             SelectableText(_error),
             const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              children: [
-                FilledButton(
-                  key: const ValueKey('lyrics-retry'),
-                  onPressed: () => setState(_start),
-                  child: const Text('Try again'),
-                ),
-                searchAgain,
-              ],
-            ),
+            searchAgain,
           ],
         },
       ],

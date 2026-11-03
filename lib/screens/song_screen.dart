@@ -7,13 +7,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 
+import '../autofill.dart';
 import '../export.dart';
 import '../jobs.dart';
 import '../karmp3.dart' show karMp3Name;
 import '../lyrics_lookup.dart';
+import '../mp3_info.dart';
 import '../pipeline.dart';
 import '../project.dart';
 import '../song_info.dart';
+import '../spotify_link.dart';
 import '../tools.dart';
 import '../windows_dialogs.dart';
 import '../wizard.dart';
@@ -63,6 +66,8 @@ class SongScreen extends StatefulWidget {
     this.songInfoFinder,
     this.songInfoDetailsFn,
     this.tagsFn,
+    this.spotifyFinder,
+    this.autofill,
     this.saveDelay = const Duration(milliseconds: 500),
   });
 
@@ -108,6 +113,17 @@ class SongScreen extends StatefulWidget {
   )?
   tagsFn;
 
+  /// Reads the song a pasted Spotify link points to; null means [findSpotifyTrack].
+  final Future<SpotifyTrack> Function(String link)? spotifyFinder;
+
+  /// Looks up what a Spotify track allows (composer, lyricist, lyrics); null means
+  /// [autofillFromSpotify]. The future is the length of the song's audio, null if unknown.
+  final Future<AutofillResult> Function(
+    SpotifyTrack track,
+    Future<double?> audioSeconds,
+  )?
+  autofill;
+
   /// How long typing pauses before it is saved.
   final Duration saveDelay;
 
@@ -132,6 +148,9 @@ class _SongScreenState extends State<SongScreen> {
   /// work/vocals.mp3 exists. Songs separated by version 1.0.x do not have it.
   bool _hasVocals = false;
   ToolPaths? _tools;
+
+  /// The length of the song's audio, measured once the tools and the source are known.
+  Future<double?>? _audioLength;
   CancellableJob? _job;
   bool _exporting = false;
 
@@ -148,6 +167,14 @@ class _SongScreenState extends State<SongScreen> {
 
   /// The recording whose composer and lyricist are being fetched after a pick.
   String? _loadingInfoId;
+
+  /// The Spotify link box of the Details step; the link is never saved.
+  final _spotifyLink = TextEditingController();
+
+  /// The text the last Spotify lookup was started for, so the same text does not start
+  /// another one by itself, and whether one is running.
+  String? _spotifyUsed;
+  bool _spotifyBusy = false;
 
   String _file(String name) => p.join(widget.dir.path, name);
 
@@ -168,6 +195,7 @@ class _SongScreenState extends State<SongScreen> {
     for (final c in _controllers.values) {
       c.dispose();
     }
+    _spotifyLink.dispose();
     super.dispose();
   }
 
@@ -235,6 +263,7 @@ class _SongScreenState extends State<SongScreen> {
       return;
     }
     _tools = tools;
+    if (_hasSource) _measureAudio(tools);
 
     if (!_hasSource) {
       _setStage(_Stage.importing);
@@ -254,6 +283,7 @@ class _SongScreenState extends State<SongScreen> {
       }
       if (!mounted) return;
       setState(() => _hasSource = true);
+      _measureAudio(tools);
       unawaited(_prefillFromTags(tools));
     }
 
@@ -275,6 +305,11 @@ class _SongScreenState extends State<SongScreen> {
       _hasInstrumental = true;
       _hasVocals = File(_file('vocals.mp3')).existsSync();
       _setStage(_Stage.ready);
+      // Someone waiting on the vocals step goes on to the next step that needs them; a
+      // user who opened another step is left where they are.
+      if (mounted && _step == WizardStep.vocals) {
+        setState(() => _step = openingStep(_facts));
+      }
     } on SeparationCancelled {
       _restoreFlagsFromDisk();
       _setStage(_Stage.cancelled);
@@ -284,6 +319,23 @@ class _SongScreenState extends State<SongScreen> {
     } finally {
       if (identical(_job, job)) _job = null;
     }
+  }
+
+  /// Starts measuring the audio (once); the lyrics results are ranked by it. A failure
+  /// leaves the length unknown, so the results keep their order.
+  // ponytail: only measured when the tools are known this session; a song reopened later is
+  // ranked by name only (finding the tools could open the download dialog from the Lyrics step).
+  void _measureAudio(ToolPaths tools) {
+    _audioLength ??= Future<double?>(() async {
+      try {
+        return await (widget.durationFn ?? durationSeconds)(
+          tools,
+          _file('source.mp3'),
+        );
+      } catch (_) {
+        return null;
+      }
+    });
   }
 
   /// After a vocal splitting that did not finish: an instrumental made earlier (when the
@@ -687,6 +739,135 @@ class _SongScreenState extends State<SongScreen> {
     }
   }
 
+  /// The Spotify link box and its button, above the song info search.
+  Widget _spotifyBox() => Padding(
+    padding: const EdgeInsets.only(bottom: 16),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: TextField(
+                key: const ValueKey('spotify-link'),
+                controller: _spotifyLink,
+                decoration: const InputDecoration(
+                  labelText: 'Spotify link (optional)',
+                  hintText: 'Paste a Spotify song link',
+                  border: OutlineInputBorder(),
+                ),
+                onChanged: _spotifyChanged,
+                onSubmitted: (_) => _spotifyGet(),
+              ),
+            ),
+            const SizedBox(width: 8),
+            if (_spotifyBusy)
+              const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  key: ValueKey('spotify-loading'),
+                  strokeWidth: 2,
+                ),
+              ),
+            const SizedBox(width: 8),
+            FilledButton(
+              key: const ValueKey('spotify-get'),
+              onPressed: _spotifyBusy ? null : _spotifyGet,
+              child: const Text('Get details'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'Fills in the details and lyrics from the link (open.spotify.com, '
+          'musicbrainz.org, lrclib.net). The audio still comes from your file.',
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+      ],
+    ),
+  );
+
+  bool _hasSpotifyLink(String text) =>
+      spotifyTrackId(text) != null || spotifyShortLink(text) != null;
+
+  /// Pasting a link starts the lookup by itself, once for each text.
+  void _spotifyChanged(String text) {
+    if (_spotifyBusy || !_hasSpotifyLink(text) || text.trim() == _spotifyUsed) {
+      return;
+    }
+    unawaited(_spotifyRun(text));
+  }
+
+  /// The button (and Enter): runs the lookup again, also for the same text.
+  void _spotifyGet() {
+    final text = _spotifyLink.text;
+    if (text.trim().isEmpty || _spotifyBusy) return;
+    if (!_hasSpotifyLink(text)) {
+      _showMessage('Paste a Spotify song link (open.spotify.com/track/...)');
+      return;
+    }
+    unawaited(_spotifyRun(text));
+  }
+
+  Future<void> _spotifyRun(String text) async {
+    _spotifyUsed = text.trim();
+    setState(() => _spotifyBusy = true);
+    try {
+      final track = await (widget.spotifyFinder ?? findSpotifyTrack)(text);
+      if (!mounted) return;
+      final length = await mp3FileSeconds(_file('source.mp3'));
+      if (!mounted) return;
+      final result = await (widget.autofill ?? autofillFromSpotify)(
+        track,
+        Future.value(length),
+      );
+      if (!mounted) return;
+      _applySpotify(result);
+    } catch (e) {
+      _showMessage('Spotify: $e');
+    } finally {
+      if (mounted) setState(() => _spotifyBusy = false);
+    }
+  }
+
+  /// Title and artist are replaced (the user pasted the link on purpose); composer, lyricist
+  /// and lyrics are filled only where they are blank, so nothing typed is lost.
+  void _applySpotify(AutofillResult r) {
+    final project = _project!;
+    bool blank(String s) => oneLine(s).isEmpty;
+    final composer = blank(project.composer) && r.composer.isNotEmpty;
+    final lyricist = blank(project.lyricist) && r.lyricist.isNotEmpty;
+    final lyrics = _controllers['lyrics']!.text.trim().isEmpty && r.lines.isNotEmpty;
+    final text = [for (final l in r.lines) l.$2].join('\n');
+    _controllers['title']!.text = r.title;
+    _controllers['artist']!.text = r.artist;
+    if (composer) _controllers['composer']!.text = r.composer;
+    if (lyricist) _controllers['lyricist']!.text = r.lyricist;
+    if (lyrics) _controllers['lyrics']!.text = text;
+    _edited((p0) {
+      p0.title = r.title;
+      p0.artist = r.artist;
+      if (composer) p0.composer = r.composer;
+      if (lyricist) p0.lyricist = r.lyricist;
+      if (lyrics) {
+        p0.setLyrics(text);
+        if (r.timingSource == 'lrclib') {
+          p0.times = [for (final l in r.lines) l.$1];
+          p0.wordTimes = List.filled(r.lines.length, null);
+          p0.timingSource = 'lrclib';
+        } else {
+          p0.timingSource = 'tapped';
+        }
+      }
+    });
+    _showMessage(
+      r.note.isEmpty
+          ? 'Filled in from Spotify'
+          : 'Filled in from Spotify. ${r.note}',
+    );
+  }
+
   Widget _lyricsStep(SongProject project) {
     // Searches by itself once per title and artist, and only for an empty box.
     final searchKey = '${oneLine(project.title)}|${oneLine(project.artist)}';
@@ -699,7 +880,10 @@ class _SongScreenState extends State<SongScreen> {
         LyricsSearchPanel(
           title: project.title,
           artist: project.artist,
-          finder: widget.lyricsFinder ?? findLyrics,
+          finder: (t, a) async {
+            final found = await (widget.lyricsFinder ?? findLyrics)(t, a);
+            return rankLyrics(found, t, a, seconds: await _audioLength);
+          },
           onPicked: (picked) => unawaited(_pickLyrics(picked)),
           autoSearch: autoSearch,
         ),
@@ -972,6 +1156,7 @@ class _SongScreenState extends State<SongScreen> {
         return scroll([_audio()]);
       case WizardStep.details:
         return scroll([
+          _spotifyBox(),
           _infoPanel(project),
           const SizedBox(height: 16),
           _field('title', 'Title (required)', (p0, t) => p0.title = t),

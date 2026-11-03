@@ -85,14 +85,23 @@ List<(double, String)> parseSyncedLyrics(String lrc) {
 /// The LRCLIB search address for [title] and [artist]. Spaces are written as %20 and
 /// the artist is left out when it is blank.
 Uri lyricsSearchUri(String title, String artist, {Uri? base}) {
-  String enc(String v) =>
-      Uri.encodeQueryComponent(oneLine(v)).replaceAll('+', '%20');
   final query = [
-    'track_name=${enc(title)}',
-    if (oneLine(artist).isNotEmpty) 'artist_name=${enc(artist)}',
+    'track_name=${_enc(title)}',
+    if (oneLine(artist).isNotEmpty) 'artist_name=${_enc(artist)}',
   ].join('&');
   return (base ?? Uri.https(lyricsHost, '/api/search')).replace(query: query);
 }
+
+String _enc(String v) =>
+    Uri.encodeQueryComponent(oneLine(v)).replaceAll('+', '%20');
+
+/// The LRCLIB address that finds the one entry of [title] by [artist] that is [seconds]
+/// long (LRCLIB allows a couple of seconds either way).
+Uri lyricsGetUri(String title, String artist, int seconds, {Uri? base}) =>
+    (base ?? Uri.https(lyricsHost, '/api/get')).replace(
+      query:
+          'track_name=${_enc(title)}&artist_name=${_enc(artist)}&duration=$seconds',
+    );
 
 const _unexpected = LyricsLookupException(
   'Unexpected answer from the lyrics server',
@@ -115,39 +124,46 @@ List<LyricsCandidate> parseLyricsSearch(String body) {
         : _unexpected;
   }
   if (json is! List) throw _unexpected;
-  String str(Object? v) => v is String ? v : '';
   final out = <LyricsCandidate>[];
   for (final e in json) {
-    if (e is! Map || e['instrumental'] == true) continue;
-    final plain = e['plainLyrics'];
-    if (plain is! String) continue;
-    final lyrics = plain.replaceAll('\r\n', '\n').replaceAll('\r', '\n').trim();
-    if (lyrics.isEmpty) continue;
-    final duration = e['duration'];
-    final synced = e['syncedLyrics'];
-    out.add(
-      LyricsCandidate(
-        title: str(e['trackName']).isNotEmpty
-            ? str(e['trackName'])
-            : str(e['name']),
-        artist: str(e['artistName']),
-        album: str(e['albumName']),
-        lyrics: lyrics,
-        seconds: duration is num ? duration.toDouble() : null,
-        synced: synced is String ? parseSyncedLyrics(synced) : const [],
-      ),
-    );
+    final c = e is Map ? _candidate(e) : null;
+    if (c != null) out.add(c);
   }
   return out;
 }
 
+/// One LRCLIB entry as a candidate, or null for an instrumental or an entry without plain
+/// lyrics.
+LyricsCandidate? _candidate(Map e) {
+  String str(Object? v) => v is String ? v : '';
+  if (e['instrumental'] == true) return null;
+  final plain = e['plainLyrics'];
+  if (plain is! String) return null;
+  final lyrics = plain.replaceAll('\r\n', '\n').replaceAll('\r', '\n').trim();
+  if (lyrics.isEmpty) return null;
+  final duration = e['duration'];
+  final synced = e['syncedLyrics'];
+  return LyricsCandidate(
+    title: str(e['trackName']).isNotEmpty ? str(e['trackName']) : str(e['name']),
+    artist: str(e['artistName']),
+    album: str(e['albumName']),
+    lyrics: lyrics,
+    seconds: duration is num ? duration.toDouble() : null,
+    synced: synced is String ? parseSyncedLyrics(synced) : const [],
+  );
+}
+
 /// [candidates] with the exact matches first: title and artist, then title only, then the
-/// rest; each group keeps its order. Case and spacing do not matter.
+/// rest; each group keeps its order. Case and spacing do not matter. With [seconds] (the
+/// length of the user's audio), inside each group the entries of about that length come
+/// first, the closest first, and entries without a length come last: timed lyrics only
+/// line up with a version of the same length.
 List<LyricsCandidate> rankLyrics(
   List<LyricsCandidate> candidates,
   String title,
-  String artist,
-) {
+  String artist, {
+  double? seconds,
+}) {
   String norm(String v) => oneLine(v).toLowerCase();
   final wantTitle = norm(title), wantArtist = norm(artist);
   int group(LyricsCandidate c) {
@@ -155,10 +171,26 @@ List<LyricsCandidate> rankLyrics(
     return norm(c.artist) == wantArtist ? 0 : 1;
   }
 
+  List<LyricsCandidate> byLength(List<LyricsCandidate> members) {
+    if (seconds == null) return members;
+    // List.sort is not stable, so the original place breaks a tie.
+    double away(int i) => members[i].seconds == null
+        ? double.infinity
+        : (members[i].seconds! - seconds).abs();
+    final order = List.generate(members.length, (i) => i)
+      ..sort((a, b) {
+        final byAway = away(a).compareTo(away(b));
+        return byAway != 0 ? byAway : a.compareTo(b);
+      });
+    return [for (final i in order) members[i]];
+  }
+
   return [
     for (final g in [0, 1, 2])
-      for (final c in candidates)
-        if (group(c) == g) c,
+      ...byLength([
+        for (final c in candidates)
+          if (group(c) == g) c,
+      ]),
   ];
 }
 
@@ -174,8 +206,7 @@ Future<List<LyricsCandidate>> findLyrics(
   Duration timeout = const Duration(seconds: 15),
   int maxBytes = 8 * 1024 * 1024,
 }) async {
-  final client = HttpClient()..connectionTimeout = timeout;
-  try {
+  return _withClient(timeout, (client) async {
     Future<List<LyricsCandidate>> lookUp(String t, String a) async {
       final found = await _search(client, t, a, base, maxBytes).timeout(timeout);
       if (found.isNotEmpty || oneLine(a).isEmpty) return found;
@@ -184,6 +215,18 @@ Future<List<LyricsCandidate>> findLyrics(
 
     final found = await lookUp(title, artist);
     return found.isNotEmpty || !_canSwap(title, artist) ? found : await lookUp(artist, title);
+  });
+}
+
+/// Runs [body] with an HTTP client that is closed afterwards, turning a timeout or a
+/// network error into a [LyricsLookupException] with a message fit to show the user.
+Future<T> _withClient<T>(
+  Duration timeout,
+  Future<T> Function(HttpClient client) body,
+) async {
+  final client = HttpClient()..connectionTimeout = timeout;
+  try {
+    return await body(client);
   } on TimeoutException {
     throw const LyricsLookupException(
       'The lyrics server did not answer in time',
@@ -195,6 +238,41 @@ Future<List<LyricsCandidate>> findLyrics(
   } finally {
     client.close(force: true);
   }
+}
+
+/// The one LRCLIB entry of [title] by [artist] that is [seconds] long (a couple of seconds
+/// either way), or null when there is none (or no title or artist to ask for). Use it when
+/// the names are exact, as from a Spotify link; [findLyrics] is the search for the rest.
+/// Throws [LyricsLookupException] with a message fit to show the user.
+Future<LyricsCandidate?> findLyricsExact(
+  String title,
+  String artist,
+  double seconds, {
+  Uri? base,
+  Duration timeout = const Duration(seconds: 15),
+  int maxBytes = 8 * 1024 * 1024,
+}) async {
+  if (oneLine(title).isEmpty || oneLine(artist).isEmpty) return null;
+  return _withClient(timeout, (client) async {
+    final request = await client.getUrl(
+      lyricsGetUri(title, artist, seconds.round(), base: base),
+    );
+    request.headers
+      ..set(HttpHeaders.userAgentHeader, 'KantaheMaker/1.0')
+      ..set(HttpHeaders.acceptHeader, 'application/json');
+    final response = await request.close().timeout(timeout);
+    final body = await _readBody(response, maxBytes).timeout(timeout);
+    if (response.statusCode == 404) return null;
+    if (response.statusCode != 200) throw _failure(response.statusCode, body);
+    final Object? json;
+    try {
+      json = jsonDecode(body);
+    } on FormatException {
+      throw _unexpected;
+    }
+    if (json is! Map) throw _unexpected;
+    return _candidate(json);
+  });
 }
 
 /// Whether swapping title and artist gives another search: both are filled in and differ.
@@ -268,12 +346,16 @@ Future<List<LyricsCandidate>> _search(
   if (response.statusCode == 200) {
     return rankLyrics(parseLyricsSearch(body), title, artist).take(10).toList();
   }
+  throw _failure(response.statusCode, body);
+}
+
+/// The error for a non-success answer: the server's own message when it sent one, else the
+/// HTTP status.
+LyricsLookupException _failure(int status, String body) {
   try {
     parseLyricsSearch(body); // an error object throws its message
   } on LyricsLookupException catch (e) {
-    if (e.message != _unexpected.message) rethrow;
+    if (e.message != _unexpected.message) return e;
   }
-  throw LyricsLookupException(
-    'The lyrics server answered HTTP ${response.statusCode}',
-  );
+  return LyricsLookupException('The lyrics server answered HTTP $status');
 }

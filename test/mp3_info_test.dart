@@ -222,6 +222,52 @@ void main() {
     });
   });
 
+  group('mp3Seconds', () {
+    const h96 = [0xFF, 0xFB, 0x70, 0x00];
+
+    test('mp3_seconds_from_info_tag', () {
+      // 1000 frames of 1152 samples at 44100 Hz.
+      final bytes = tagged(h96, tag: 'Info', frames: 1000, bytes: 313000);
+      expect(mp3Seconds(bytes, bytes.length), closeTo(26.122, 0.001));
+    });
+
+    test('mp3_seconds_from_xing_tag', () {
+      final bytes = tagged(h96, frames: 1000, bytes: 360000);
+      expect(mp3Seconds(bytes, 99999999), closeTo(26.122, 0.001));
+    });
+
+    test('mp3_seconds_estimated_without_tag', () {
+      // 128 kbps is 16000 bytes a second.
+      expect(
+        mp3Seconds(withHeader([0xFF, 0xFB, 0x90, 0x00]), 160000),
+        closeTo(10.0, 0.0001),
+      );
+    });
+
+    test('mp3_seconds_estimate_leaves_out_the_id3_tag', () {
+      final id3 = [...'ID3'.codeUnits, 3, 0, 0, 0x00, 0x00, 0x00, 0x14, ...List.filled(20, 0)];
+      final head = [...id3, 0xFF, 0xFB, 0x90, 0x00, ...List.filled(100, 0)];
+      // The tag is 30 bytes; the rest of a 160030-byte file is 10 s of 128 kbps.
+      expect(mp3Seconds(head, 160030), closeTo(10.0, 0.0001));
+    });
+
+    test('mp3_file_seconds_reads_a_file', () async {
+      final dir = Directory.systemTemp.createTempSync('mp3sec');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final file = File('${dir.path}/a.mp3')
+        ..writeAsBytesSync(tagged(h96, tag: 'Info', frames: 1000, bytes: 313000));
+      expect(await mp3FileSeconds(file.path), closeTo(26.122, 0.001));
+      File('${dir.path}/b.mp3').writeAsStringSync('<html></html>');
+      expect(await mp3FileSeconds('${dir.path}/b.mp3'), isNull);
+      expect(await mp3FileSeconds('${dir.path}/missing.mp3'), isNull);
+    });
+
+    test('mp3_seconds_not_an_mp3', () {
+      expect(mp3Seconds('<html></html>'.codeUnits, 13), isNull);
+      expect(mp3Seconds(const [], 0), isNull);
+    });
+  });
+
   test('describe_mp3', () {
     expect(describeMp3(const Mp3Info(kbps: 128, hertz: 44100, channels: 2)), 'MP3, 44.1 kHz, 128 kbps');
     expect(describeMp3(const Mp3Info(kbps: 128, hertz: 48000, channels: 2)), 'MP3, 48 kHz, 128 kbps');

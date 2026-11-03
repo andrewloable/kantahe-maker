@@ -178,6 +178,42 @@ void main() {
       expect(out, [both, titleOnly, other, other2]);
     });
 
+    LyricsCandidate timed(String title, String artist, double? seconds, [String tag = 'l']) =>
+        LyricsCandidate(
+          title: title,
+          artist: artist,
+          album: '',
+          lyrics: tag,
+          seconds: seconds,
+        );
+
+    test('rank_by_length_within_group', () {
+      final a = timed('S', 'A', 300, 'a');
+      final b = timed('S', 'A', 356, 'b');
+      final c = timed('S', 'A', 354, 'c');
+      final d = timed('S', 'A', null, 'd');
+      final out = rankLyrics([a, b, c, d], 'S', 'A', seconds: 355);
+      // 356 and 354 are 1 s away (the first of them stays first), then 300, then no length.
+      expect(out.map((x) => x.lyrics), ['b', 'c', 'a', 'd']);
+    });
+
+    test('rank_by_length_keeps_groups', () {
+      final exact = timed('S', 'A', 200, 'exact');
+      final titleOnly = timed('S', 'Other', 355, 'title');
+      final out = rankLyrics([titleOnly, exact], 'S', 'A', seconds: 355);
+      expect(out.map((x) => x.lyrics), ['exact', 'title']);
+    });
+
+    test('rank_without_seconds_unchanged', () {
+      final a = timed('S', 'A', 300, 'a');
+      final b = timed('S', 'A', 355, 'b');
+      expect(rankLyrics([a, b], 'S', 'A').map((x) => x.lyrics), ['a', 'b']);
+      expect(
+        rankLyrics([a, b], 'S', 'A', seconds: null).map((x) => x.lyrics),
+        ['a', 'b'],
+      );
+    });
+
     test('rank_without_artist_matches_on_title', () {
       final a = cand('X', 'p');
       final b = cand('Y', 'q');
@@ -471,6 +507,133 @@ void main() {
       expect(
         await findLyrics('t', 'a', base: base, maxBytes: 100000),
         hasLength(1),
+      );
+    });
+  });
+
+  group('lyricsGetUri', () {
+    test('get_uri_encodes', () {
+      final u = lyricsGetUri('My  Song', 'A B', 354);
+      expect(u.host, 'lrclib.net');
+      expect(u.path, '/api/get');
+      expect(u.query, 'track_name=My%20Song&artist_name=A%20B&duration=354');
+    });
+  });
+
+  group('findLyricsExact', () {
+    late HttpServer server;
+    late Uri base;
+    final seen = <Uri>[];
+    var status = 200;
+    var body = '{}';
+
+    Map<String, Object?> found({bool instrumental = false}) => {
+      'id': 1,
+      'trackName': 'Song',
+      'artistName': 'Singer',
+      'albumName': 'Album',
+      'duration': 200.0,
+      'instrumental': instrumental,
+      'plainLyrics': 'la la\nna na',
+      'syncedLyrics': '[00:01.00]la la\n[00:02.50]na na',
+    };
+
+    setUp(() async {
+      seen.clear();
+      status = 200;
+      body = jsonEncode(found());
+      server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      base = Uri.parse('http://127.0.0.1:${server.port}/api/get');
+      server.listen((req) {
+        seen.add(req.uri);
+        req.response
+          ..statusCode = status
+          ..headers.contentType = ContentType.json
+          ..write(body)
+          ..close();
+      });
+    });
+    tearDown(() => server.close(force: true));
+
+    test('exact_found_timed', () async {
+      final c = await findLyricsExact('Song', 'Singer', 199.6, base: base);
+      expect(c, isNotNull);
+      expect(c!.synced, [(1.0, 'la la'), (2.5, 'na na')]);
+      expect(c.seconds, 200.0);
+      expect(c.title, 'Song');
+      expect(seen.single.path, '/api/get');
+      expect(seen.single.queryParameters, {
+        'track_name': 'Song',
+        'artist_name': 'Singer',
+        'duration': '200',
+      });
+    });
+
+    test('exact_not_found', () async {
+      status = 404;
+      body = '{"code":404,"name":"TrackNotFound","message":"Failed to find specified track"}';
+      expect(await findLyricsExact('Song', 'Singer', 200, base: base), isNull);
+    });
+
+    test('exact_instrumental', () async {
+      body = jsonEncode(found(instrumental: true));
+      expect(await findLyricsExact('Song', 'Singer', 200, base: base), isNull);
+    });
+
+    test('exact_blank_artist', () async {
+      expect(await findLyricsExact('Song', '  ', 200, base: base), isNull);
+      expect(await findLyricsExact('', 'Singer', 200, base: base), isNull);
+      expect(seen, isEmpty);
+    });
+
+    test('exact_http_error', () async {
+      status = 500;
+      body = 'oops';
+      await expectLater(
+        findLyricsExact('Song', 'Singer', 200, base: base),
+        throwsA(
+          isA<LyricsLookupException>().having(
+            (e) => e.message,
+            'message',
+            'The lyrics server answered HTTP 500',
+          ),
+        ),
+      );
+    });
+
+    test('exact_timeout', () async {
+      final hung = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => hung.close(force: true));
+      hung.listen((_) {});
+      await expectLater(
+        findLyricsExact(
+          'Song',
+          'Singer',
+          200,
+          base: Uri.parse('http://127.0.0.1:${hung.port}/api/get'),
+          timeout: const Duration(milliseconds: 300),
+        ),
+        throwsA(
+          isA<LyricsLookupException>().having(
+            (e) => e.message,
+            'message',
+            'The lyrics server did not answer in time',
+          ),
+        ),
+      );
+    });
+
+    test('exact_unexpected_answer', () async {
+      body = '[1,2]';
+      await expectLater(
+        findLyricsExact('Song', 'Singer', 200, base: base),
+        throwsA(
+          isA<LyricsLookupException>().having(
+            (e) => e.message,
+            'message',
+            'Unexpected answer from the lyrics server',
+          ),
+        ),
       );
     });
   });

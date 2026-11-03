@@ -161,17 +161,7 @@ class _SongInfoPanelState extends State<SongInfoPanel> {
           _Phase.error => [
             SelectableText(_error),
             const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              children: [
-                FilledButton(
-                  key: const ValueKey('info-retry'),
-                  onPressed: () => setState(_start),
-                  child: const Text('Try again'),
-                ),
-                searchAgain,
-              ],
-            ),
+            searchAgain,
           ],
         },
       ],

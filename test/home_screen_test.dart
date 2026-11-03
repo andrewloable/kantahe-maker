@@ -1,11 +1,15 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:kantahe_maker/autofill.dart';
 import 'package:kantahe_maker/project.dart';
 import 'package:kantahe_maker/screens/home_screen.dart';
 import 'package:kantahe_maker/screens/song_screen.dart';
+import 'package:kantahe_maker/spotify_link.dart';
+import 'package:kantahe_maker/spotsaver.dart';
 import 'package:kantahe_maker/widgets/brand_header.dart';
 
 import 'support/settle.dart';
@@ -49,6 +53,12 @@ Future<Calls> pumpHome(
   DateTime Function()? now,
   Future<Directory> Function()? projectsRoot,
   Object? pickError,
+  Future<SpotifyTrack> Function(String)? spotifyFinder,
+  SpotifyDownloader? downloader,
+  Future<AutofillResult> Function(SpotifyTrack, Future<double?>)? autofill,
+  String? clipboard,
+  void Function(BuildContext, Directory)? openOverride,
+  void Function(String)? onLog,
 }) async {
   final calls = Calls()..picked = pick;
   await tester.binding.setSurfaceSize(const Size(900, 900));
@@ -62,15 +72,62 @@ Future<Calls> pumpHome(
           if (pickError != null) throw pickError;
           return calls.picked;
         },
-        onOpen: (context, dir) => calls.opened.add(p.basename(dir.path)),
+        onOpen: (context, dir) {
+          calls.opened.add(p.basename(dir.path));
+          openOverride?.call(context, dir);
+        },
         settingsBuilder: (_) => const Scaffold(body: Text('SETTINGS PAGE')),
         now: now,
+        spotifyFinder: spotifyFinder,
+        downloader: downloader,
+        autofill: autofill,
+        readClipboard: () async => clipboard,
+        onLog: onLog,
       ),
     ),
   );
   await settle(tester);
   return calls;
 }
+
+const spotifyLink = 'https://open.spotify.com/track/4u7EnebtmKWzUH433cf5Qv?si=x1';
+const track = SpotifyTrack(id: 'i', title: 'Song', artist: 'Singer', seconds: 200);
+
+/// An MP3 whose Info tag says 1000 frames of 1152 samples at 44100 Hz (26.122 s).
+List<int> tinyMp3() {
+  List<int> u32(int v) => [v >> 24 & 255, v >> 16 & 255, v >> 8 & 255, v & 255];
+  return [
+    0xFF, 0xFB, 0x70, 0x00, ...List.filled(32, 0),
+    ...'Info'.codeUnits, ...u32(3), ...u32(1000), ...u32(313000),
+    ...List.filled(100, 0),
+  ];
+}
+
+// Made-up lyrics only.
+const timedResult = AutofillResult(
+  title: 'Song',
+  artist: 'Singer',
+  composer: 'C',
+  lyricist: 'L',
+  lines: [(1.0, 'la la'), (2.5, 'na na')],
+  timingSource: 'lrclib',
+);
+
+Future<void> openRobot(WidgetTester tester) async {
+  await tester.tap(find.byKey(const ValueKey('new-from-spotify')));
+  await settle(
+    tester,
+    until: () => find.byKey(const ValueKey('spotify-dialog')).evaluate().isNotEmpty,
+  );
+}
+
+Future<void> tapKey(WidgetTester tester, String key) async {
+  await tester.tap(find.byKey(ValueKey(key)));
+  await tester.pump();
+}
+
+Map<String, dynamic> readProject(Directory dir) =>
+    jsonDecode(readText(File('${dir.path}/project.json'))) as Map<String, dynamic>;
 
 void main() {
   testWidgets('home_lists_newest_first', (tester) async {
@@ -470,5 +527,314 @@ void main() {
       ),
       findsOneWidget,
     );
+  });
+
+  group('song from a Spotify link (robot icon)', () {
+    const notice =
+        'The song is converted from a YouTube video by spotsaver.net, a service not '
+        'connected to Spotify or to Kantahe Maker, in a Chrome or Edge window that opens minimized for a few seconds. '
+        'Use it only for songs you have the right to use.';
+
+    Future<File> fakeDownload(Directory into) async {
+      final file = File('${into.path}/download.mp3')..writeAsBytesSync(tinyMp3());
+      return file;
+    }
+
+    testWidgets('robot_prefills_from_clipboard', (tester) async {
+      final root = await makeRoot(tester);
+      await pumpHome(tester, root, clipboard: 'Listen: $spotifyLink');
+      await openRobot(tester);
+      expect(
+        tester.widget<TextField>(find.byKey(const ValueKey('spotify-dialog-link'))).controller!.text,
+        'Listen: $spotifyLink',
+      );
+      expect(
+        tester.widget<FilledButton>(find.byKey(const ValueKey('spotify-dialog-download'))).onPressed,
+        isNotNull,
+      );
+    });
+
+    testWidgets('robot_ignores_a_clipboard_without_a_link', (tester) async {
+      final root = await makeRoot(tester);
+      await pumpHome(tester, root, clipboard: 'hello');
+      await openRobot(tester);
+      expect(
+        tester.widget<TextField>(find.byKey(const ValueKey('spotify-dialog-link'))).controller!.text,
+        '',
+      );
+      expect(
+        tester.widget<FilledButton>(find.byKey(const ValueKey('spotify-dialog-download'))).onPressed,
+        isNull,
+      );
+    });
+
+    testWidgets('robot_notice_shown', (tester) async {
+      final root = await makeRoot(tester);
+      await pumpHome(tester, root);
+      await openRobot(tester);
+      expect(find.text(notice), findsOneWidget);
+    });
+
+    testWidgets('robot_success_creates_and_opens', (tester) async {
+      final root = await makeRoot(tester);
+      Directory? temp;
+      final logs = <String>[];
+      final calls = await pumpHome(
+        tester,
+        root,
+        onLog: logs.add,
+        clipboard: spotifyLink,
+        spotifyFinder: (l) async => track,
+        downloader: (link, into, {onStatus, cancel, onBrowser}) async {
+          temp = into;
+          return fakeDownload(into);
+        },
+        autofill: (t, audio) async => timedResult,
+      );
+      await openRobot(tester);
+      await tapKey(tester, 'spotify-dialog-download');
+      await settle(tester, until: () => calls.opened.isNotEmpty);
+      final dirs = root.listSync().whereType<Directory>().toList();
+      expect(dirs, hasLength(1));
+      final j = readProject(dirs.single);
+      expect(j['inputPath'], '${dirs.single.path}/download.mp3');
+      expect((j['title'], j['artist'], j['composer'], j['lyricist']), ('Song', 'Singer', 'C', 'L'));
+      expect(j['lyrics'], 'la la\nna na');
+      expect(j['times'], [1.0, 2.5]);
+      expect(j['timingSource'], 'lrclib');
+      expect(File('${dirs.single.path}/download.mp3').readAsBytesSync(), tinyMp3());
+      expect(calls.opened, [p.basename(dirs.single.path)]);
+      expect(temp!.existsSync(), isFalse, reason: 'the temporary folder is deleted');
+      final log = logs.join('\n');
+      expect(log, contains('[spotify] flow start (track link)'));
+      expect(log, contains('[spotify] link read: "Song" by "Singer", 200.0 s'));
+      expect(log, contains('[spotify] download starts'));
+      expect(log, contains('[spotify] download finished:'));
+      expect(log, contains('[spotify] song created:'));
+      expect(log, contains('2 lyric lines, source lrclib'));
+      expect(log, contains('[spotify] flow over'));
+      expect(log, isNot(contains('la la')), reason: 'no lyrics in the log');
+      await settle(
+        tester,
+        until: () => find.byKey(const ValueKey('spotify-dialog')).evaluate().isEmpty,
+      );
+    });
+
+    testWidgets('robot_lookups_run_during_download', (tester) async {
+      final root = await makeRoot(tester);
+      final order = <String>[];
+      final gate = Completer<void>();
+      final calls = await pumpHome(
+        tester,
+        root,
+        clipboard: spotifyLink,
+        spotifyFinder: (l) async => track,
+        downloader: (link, into, {onStatus, cancel, onBrowser}) async {
+          order.add('download started');
+          await gate.future;
+          order.add('download done');
+          return fakeDownload(into);
+        },
+        autofill: (t, audio) async {
+          order.add('lookups started');
+          return timedResult;
+        },
+      );
+      await openRobot(tester);
+      await tapKey(tester, 'spotify-dialog-download');
+      await settle(tester, until: () => order.contains('lookups started'));
+      expect(order, isNot(contains('download done')));
+      expect(root.listSync(), isEmpty, reason: 'no song before the audio exists');
+      gate.complete();
+      await settle(tester, until: () => calls.opened.isNotEmpty);
+      expect(order.indexOf('lookups started'), lessThan(order.indexOf('download done')));
+    });
+
+    testWidgets('robot_audio_length_comes_from_the_download', (tester) async {
+      final root = await makeRoot(tester);
+      double? length;
+      final calls = await pumpHome(
+        tester,
+        root,
+        clipboard: spotifyLink,
+        spotifyFinder: (l) async => track,
+        downloader: (link, into, {onStatus, cancel, onBrowser}) async => fakeDownload(into),
+        autofill: (t, audio) async {
+          length = await audio;
+          return timedResult;
+        },
+      );
+      await openRobot(tester);
+      await tapKey(tester, 'spotify-dialog-download');
+      await settle(tester, until: () => calls.opened.isNotEmpty);
+      expect(length, closeTo(26.122, 0.001));
+    });
+
+    testWidgets('robot_download_failure_offers_a_file', (tester) async {
+      final root = await makeRoot(tester);
+      var downloads = 0;
+      double? length;
+      final chosen = File('${root.path}/mine.mp3')..writeAsBytesSync(tinyMp3());
+      final calls = await pumpHome(
+        tester,
+        root,
+        pick: chosen.path,
+        clipboard: spotifyLink,
+        spotifyFinder: (l) async => track,
+        downloader: (link, into, {onStatus, cancel, onBrowser}) async {
+          downloads++;
+          throw const SpotsaverException('spotsaver.net took too long. Try again later.');
+        },
+        autofill: (t, audio) async {
+          length = await audio;
+          return timedResult;
+        },
+      );
+      await openRobot(tester);
+      await tapKey(tester, 'spotify-dialog-download');
+      await settle(
+        tester,
+        until: () => find.byKey(const ValueKey('spotify-dialog-choose')).evaluate().isNotEmpty,
+      );
+      expect(find.text('spotsaver.net took too long. Try again later.'), findsOneWidget);
+      expect(root.listSync().whereType<Directory>(), isEmpty, reason: 'no song folder yet');
+      await tapKey(tester, 'spotify-dialog-choose');
+      await settle(tester, until: () => calls.opened.isNotEmpty);
+      final dir = root.listSync().whereType<Directory>().single;
+      final j = readProject(dir);
+      expect(j['inputPath'], chosen.path);
+      expect((j['title'], j['artist']), ('Song', 'Singer'));
+      expect(length, closeTo(26.122, 0.001), reason: 'the length of the chosen file');
+      expect(downloads, 1);
+    });
+
+    testWidgets('robot_try_again_downloads_again', (tester) async {
+      final root = await makeRoot(tester);
+      var downloads = 0;
+      final calls = await pumpHome(
+        tester,
+        root,
+        clipboard: spotifyLink,
+        spotifyFinder: (l) async => track,
+        downloader: (link, into, {onStatus, cancel, onBrowser}) async {
+          if (++downloads == 1) throw const SpotsaverException('spotsaver.net took too long.');
+          return fakeDownload(into);
+        },
+        autofill: (t, audio) async => timedResult,
+      );
+      await openRobot(tester);
+      await tapKey(tester, 'spotify-dialog-download');
+      await settle(
+        tester,
+        until: () => find.byKey(const ValueKey('spotify-dialog-again')).evaluate().isNotEmpty,
+      );
+      await tapKey(tester, 'spotify-dialog-again');
+      await settle(tester, until: () => calls.opened.isNotEmpty);
+      expect(downloads, 2);
+      expect(root.listSync().whereType<Directory>(), hasLength(1));
+    });
+
+    testWidgets('robot_cancel_leaves_nothing', (tester) async {
+      final root = await makeRoot(tester);
+      Directory? temp;
+      var sawCancel = false;
+      final started = Completer<void>();
+      final calls = await pumpHome(
+        tester,
+        root,
+        clipboard: spotifyLink,
+        spotifyFinder: (l) async => track,
+        downloader: (link, into, {onStatus, cancel, onBrowser}) async {
+          temp = into;
+          started.complete();
+          await cancel;
+          sawCancel = true;
+          throw const SpotsaverException('Cancelled');
+        },
+        autofill: (t, audio) async => timedResult,
+      );
+      await openRobot(tester);
+      await tapKey(tester, 'spotify-dialog-download');
+      await settle(tester, until: () => started.isCompleted);
+      await tapKey(tester, 'spotify-dialog-cancel');
+      await settle(
+        tester,
+        until: () => find.byKey(const ValueKey('spotify-dialog')).evaluate().isEmpty,
+      );
+      expect(sawCancel, isTrue);
+      expect(root.listSync(), isEmpty);
+      expect(calls.opened, isEmpty);
+      expect(temp!.existsSync(), isFalse);
+    });
+
+    testWidgets('robot_spotify_error', (tester) async {
+      final root = await makeRoot(tester);
+      var downloads = 0;
+      await pumpHome(
+        tester,
+        root,
+        clipboard: spotifyLink,
+        spotifyFinder: (l) async =>
+            throw const SpotifyLinkException('Spotify has no song with this link'),
+        downloader: (link, into, {onStatus, cancel, onBrowser}) async {
+          downloads++;
+          return fakeDownload(into);
+        },
+        autofill: (t, audio) async => timedResult,
+      );
+      await openRobot(tester);
+      await tapKey(tester, 'spotify-dialog-download');
+      await settle(
+        tester,
+        until: () => find.text('Spotify has no song with this link').evaluate().isNotEmpty,
+      );
+      expect(downloads, 0);
+      expect(find.byKey(const ValueKey('spotify-dialog-choose')), findsNothing);
+      expect(root.listSync(), isEmpty);
+    });
+
+    testWidgets('robot_closes_the_dialog_before_the_song_opens', (tester) async {
+      final root = await makeRoot(tester);
+      final calls = await pumpHome(
+        tester,
+        root,
+        clipboard: spotifyLink,
+        spotifyFinder: (l) async => track,
+        downloader: (link, into, {onStatus, cancel, onBrowser}) async => fakeDownload(into),
+        autofill: (t, audio) async => timedResult,
+        // A real route on top, like the song screen: popping the dialog afterwards would
+        // pop this instead.
+        openOverride: (context, dir) => Navigator.of(context).push(
+          MaterialPageRoute<void>(builder: (_) => const Scaffold(body: Text('SONG OPENED'))),
+        ),
+      );
+      await openRobot(tester);
+      await tapKey(tester, 'spotify-dialog-download');
+      await settle(tester, until: () => calls.opened.isNotEmpty);
+      await settle(tester, until: () => find.text('SONG OPENED').evaluate().isNotEmpty);
+      await tester.pump(const Duration(seconds: 1));
+      expect(find.text('SONG OPENED'), findsOneWidget, reason: 'the song stays open');
+      expect(find.byKey(const ValueKey('spotify-dialog')), findsNothing);
+    });
+
+    testWidgets('robot_shows_the_note_after_opening', (tester) async {
+      final root = await makeRoot(tester);
+      final calls = await pumpHome(
+        tester,
+        root,
+        clipboard: spotifyLink,
+        spotifyFinder: (l) async => track,
+        downloader: (link, into, {onStatus, cancel, onBrowser}) async => fakeDownload(into),
+        autofill: (t, audio) async => const AutofillResult(
+          title: 'Song',
+          artist: 'Singer',
+          note: 'Tap the timing in Timing.',
+        ),
+      );
+      await openRobot(tester);
+      await tapKey(tester, 'spotify-dialog-download');
+      await settle(tester, until: () => calls.opened.isNotEmpty);
+      await settle(tester, until: () => find.textContaining('Tap the timing').evaluate().isNotEmpty);
+    });
   });
 }

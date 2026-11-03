@@ -44,7 +44,7 @@ Click **New song** and pick an audio or video file (an .mp3 or .mp4, for example
 
 <img src="docs/screenshots/02-remove-vocals.png" alt="Vocal splitting running" width="600">
 
-**3. Details.** Title and artist come from the file (a name like "Title - Artist.mp3" is expected); pick a match for composer and lyricist. If nothing is found, the search is tried again with title and artist swapped, in case the file is named "Artist - Title". The Lyrics step also tries the swapped order when it finds nothing.
+**3. Details.** Title and artist come from the file (a name like "Title - Artist.mp3" is expected); pick a match for composer and lyricist. If nothing is found, the search is tried again with title and artist swapped, in case the file is named "Artist - Title". The Lyrics step also tries the swapped order when it finds nothing. Or paste a Spotify song link in the box at the top of Details: the title, artist, composer, lyricist and lyrics are filled in by themselves (lyrics only into an empty box; their times only when they fit the length of your audio). The audio still comes from your file.
 
 <img src="docs/screenshots/03-details.png" alt="Song details with a list of matches" width="600">
 
@@ -66,6 +66,8 @@ Your songs stay on your computer. The app sends only a few words, only to these 
 
 - **Details:** the title and artist (or the file name) go to musicbrainz.org.
 - **Lyrics:** the title and artist go to lrclib.net, and to lyrics.ovh when lrclib.net finds nothing.
+- **Spotify link (optional):** the link you paste goes to open.spotify.com, to read the title, artist and length; those then go to musicbrainz.org and lrclib.net as above.
+- **New song from a Spotify link (robot icon):** the same, and spotsaver.net is opened in a Chrome or Edge window that opens minimized for a few seconds with your link, as if you used the site yourself; it sends back the MP3.
 - **Tools:** with your consent, about 1.4 GB once (see Download).
 
 Nothing else leaves your computer. There is no account.
@@ -75,6 +77,10 @@ Nothing else leaves your computer. There is no account.
 **Which files can I use?** Audio or video files: .mp3, .mp4, .m4a, .mkv, .webm, .wav and .flac.
 
 **How long does vocal splitting take?** It depends on your computer and the song. It runs in the background, so you can fill in the details and lyrics meanwhile.
+
+**Where does the audio of a Spotify link come from?** The robot icon next to "New song" asks for a Spotify song link and does the rest: spotsaver.net converts a YouTube video of the song to MP3 in a Chrome or Edge window that opens minimized for a few seconds, the details and lyrics come from the link, and the song opens ready for vocal splitting. It is not Spotify's audio, so quality and version can differ. It needs Google Chrome or Microsoft Edge installed. Use it only for songs you have the right to use.
+
+**The download from a Spotify link failed. What now?** Choose your own MP3 in the same window ("Choose an MP3 instead"): the details and lyrics from the link are kept. Or try again.
 
 **Where are my songs saved?** In the app's folder for your user (on macOS: `~/Library/Application Support/party.kantahe.maker/projects`), saved as you go. The `.karmp3` goes where you choose. Delete a song from the list on the home screen.
 
