@@ -6,6 +6,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:kantahe_maker/cdp.dart';
 import 'package:kantahe_maker/tools.dart';
 
+import 'support/process.dart';
+
 void main() {
   group('browserCandidates', () {
     test('candidates_macos', () {
@@ -92,6 +94,49 @@ void main() {
     });
   });
 
+  group('readPortFile', () {
+    late Directory dir;
+    setUp(() => dir = Directory.systemTemp.createTempSync('portfile'));
+    tearDown(() => dir.deleteSync(recursive: true));
+
+    test('port_file_missing_is_null', () {
+      expect(readPortFile(File('${dir.path}/DevToolsActivePort')), isNull);
+    });
+
+    test('port_file_half_written_is_null', () {
+      final f = File('${dir.path}/DevToolsActivePort');
+      f.writeAsStringSync('');
+      expect(readPortFile(f), isNull);
+      f.writeAsStringSync('9222');
+      expect(readPortFile(f), isNull);
+      f.writeAsStringSync('9222\n');
+      expect(readPortFile(f), isNull);
+    });
+
+    test('port_file_is_read', () {
+      final f = File('${dir.path}/DevToolsActivePort')
+        ..writeAsStringSync('9222\n/devtools/browser/abc\n');
+      expect(readPortFile(f), (9222, '/devtools/browser/abc'));
+    });
+
+    test('port_file_that_cannot_be_opened_is_null', () {
+      // A file the browser still holds locked (Windows) cannot be read; without read
+      // permission it fails the same way (a FileSystemException).
+      final f = File('${dir.path}/DevToolsActivePort')
+        ..writeAsStringSync('9222\n/devtools/browser/abc\n');
+      Process.runSync('chmod', ['000', f.path]);
+      addTearDown(() => Process.runSync('chmod', ['600', f.path]));
+      try {
+        f.readAsStringSync();
+        markTestSkipped('this user can read the file anyway (running as root?)');
+        return;
+      } on FileSystemException {
+        // As intended.
+      }
+      expect(readPortFile(f), isNull);
+    }, skip: Platform.isWindows ? 'chmod does not exist on Windows' : false);
+  });
+
   group('CdpBrowser with a real browser', () {
     String? exe() {
       final named = Platform.environment['KANTAHE_TEST_BROWSER'];
@@ -106,11 +151,11 @@ void main() {
       final b = await CdpBrowser.launch(found!);
       final pid = b.pid!;
       final profile = b.profilePath!;
-      expect(Process.runSync('kill', ['-0', '$pid']).exitCode, 0);
+      expect(processAlive(pid), isTrue);
       expect(Directory(profile).existsSync(), isTrue);
       b.cancel();
       await b.done.timeout(const Duration(seconds: 20));
-      expect(Process.runSync('kill', ['-0', '$pid']).exitCode, isNot(0));
+      expect(processAlive(pid), isFalse);
       expect(Directory(profile).existsSync(), isFalse);
     }, skip: found == null ? 'no Chromium-based browser installed' : false,
         timeout: const Timeout(Duration(seconds: 60)));
@@ -227,9 +272,13 @@ void main() {
     });
 
     test('cdp_pending_sends_fail_when_the_socket_closes', () async {
-      final pending = browser.send('Never.answered');
+      // The matcher is attached first: the error may arrive before the next line runs.
+      final pending = expectLater(
+        browser.send('Never.answered'),
+        throwsA(isA<CdpException>()),
+      );
       await fake.close();
-      await expectLater(pending, throwsA(isA<CdpException>()));
+      await pending;
     });
   });
 }

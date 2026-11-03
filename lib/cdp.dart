@@ -84,6 +84,20 @@ String? findBrowser(
   return (port, lines[1]);
 }
 
+/// The port and path in the DevToolsActivePort [file], or null while it is not there, only
+/// half written, or cannot be opened: on Windows the browser keeps the file locked while it
+/// writes it, so a failed read means "try again", not "broken".
+(int, String)? readPortFile(File file) {
+  try {
+    if (!file.existsSync()) return null;
+    return parseDevToolsActivePort(file.readAsStringSync());
+  } on FormatException {
+    return null;
+  } on FileSystemException {
+    return null;
+  }
+}
+
 class CdpException implements Exception {
   final String message;
   const CdpException(this.message);
@@ -109,7 +123,7 @@ class CdpBrowser implements CancellableJob {
     String exe, {
     bool headless = true,
     List<String> extraArgs = const [],
-    Duration startTimeout = const Duration(seconds: 15),
+    Duration startTimeout = const Duration(seconds: 40),
   }) async {
     final profile = await Directory.systemTemp.createTemp('kantahe_cdp');
     Process? process;
@@ -136,14 +150,11 @@ class CdpBrowser implements CancellableJob {
         if (DateTime.now().isAfter(deadline)) {
           throw const CdpException('The browser did not start in time');
         }
-        if (file.existsSync()) {
-          try {
-            final (port, path) = parseDevToolsActivePort(file.readAsStringSync());
-            final socket = await WebSocket.connect('ws://127.0.0.1:$port$path');
-            return CdpBrowser._(socket, process, profile);
-          } on FormatException {
-            // The file is still being written.
-          }
+        final found = readPortFile(file);
+        if (found != null) {
+          final (port, path) = found;
+          final socket = await WebSocket.connect('ws://127.0.0.1:$port$path');
+          return CdpBrowser._(socket, process, profile);
         }
         await Future<void>.delayed(const Duration(milliseconds: 100));
       }

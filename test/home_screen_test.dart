@@ -597,12 +597,12 @@ void main() {
       final dirs = root.listSync().whereType<Directory>().toList();
       expect(dirs, hasLength(1));
       final j = readProject(dirs.single);
-      expect(j['inputPath'], '${dirs.single.path}/download.mp3');
+      expect(j['inputPath'], p.join(dirs.single.path, 'download.mp3'));
       expect((j['title'], j['artist'], j['composer'], j['lyricist']), ('Song', 'Singer', 'C', 'L'));
       expect(j['lyrics'], 'la la\nna na');
       expect(j['times'], [1.0, 2.5]);
       expect(j['timingSource'], 'lrclib');
-      expect(File('${dirs.single.path}/download.mp3').readAsBytesSync(), tinyMp3());
+      expect(File(p.join(dirs.single.path, 'download.mp3')).readAsBytesSync(), tinyMp3());
       expect(calls.opened, [p.basename(dirs.single.path)]);
       expect(temp!.existsSync(), isFalse, reason: 'the temporary folder is deleted');
       final log = logs.join('\n');

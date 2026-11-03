@@ -5,6 +5,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:kantahe_maker/cdp.dart';
 import 'package:kantahe_maker/spotsaver.dart';
 import 'package:kantahe_maker/tools.dart';
+import 'package:path/path.dart' as p;
+
+import 'support/process.dart';
 
 /// A tiny file that is an MP3 as far as readMp3Info can tell (a 128 kbps frame header).
 final tinyMp3 = [0xFF, 0xFB, 0x90, 0x00, ...List.filled(1996, 7)];
@@ -126,7 +129,6 @@ b.addEventListener('click', function () {
   Future<void> stop() => server.close(force: true);
 }
 
-bool processAlive(int pid) => Process.runSync('kill', ['-0', '$pid']).exitCode == 0;
 
 void main() {
   const link = 'https://open.spotify.com/track/4u7EnebtmKWzUH433cf5Qv';
@@ -223,7 +225,7 @@ void main() {
     test('full_flow_against_a_fake_site', () async {
       await startSite('ok');
       final file = await run();
-      expect(file.path, '${into.path}/download.mp3');
+      expect(file.path, p.join(into.path, 'download.mp3'));
       expect(file.readAsBytesSync(), tinyMp3);
       expect(into.listSync().map((e) => e.path), [file.path], reason: 'nothing else is left');
       expect(site.links, [link]);
