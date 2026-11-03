@@ -96,6 +96,10 @@ const _stateJs = '''
 })()
 ''';
 
+/// Whether the link box is empty. After a submit that worked it still holds the link; after
+/// one the page dropped, the page has been reloaded and the box is empty again.
+const _boxEmptyJs = "(() => { const i = document.querySelector('form input'); return !!i && i.value === ''; })()";
+
 const _clickJs = "(() => { const b = document.querySelector('[data-kantahe-dl]'); if (b) b.click(); return !!b; })()";
 
 const _pageTextJs =
@@ -120,8 +124,9 @@ const _pageTextJs =
 /// app's job list. [onLog] gets one line per step (with the seconds since the start) for the
 /// debug log; it never holds song text. The browser is always closed and its profile folder deleted, and nothing
 /// but download.mp3 is left in [into]. [site], [browserPath], [browserExists] and
-/// [findTimeout] (how long to wait for the link box and the song to show) and [headless] are
-/// for tests.
+/// [findTimeout] (how long to wait for the link box and the song to show), [resubmitAfter]
+/// (how long the page may stay on the start page before the link is sent again) and
+/// [headless] are for tests.
 Future<File> downloadWithSpotsaver(
   String spotifyLink,
   Directory into, {
@@ -132,6 +137,7 @@ Future<File> downloadWithSpotsaver(
   Uri? site,
   Duration timeout = const Duration(minutes: 5),
   Duration findTimeout = const Duration(seconds: 45),
+  Duration resubmitAfter = const Duration(seconds: 6),
   bool headless = false,
   void Function(CdpBrowser browser)? onBrowser,
   void Function(String line)? onLog,
@@ -262,10 +268,18 @@ Future<File> downloadWithSpotsaver(
       linkBoxWait = const Duration(minutes: 2);
     }
 
-    final startPath = await poll<String>(() async {
+    var fills = 0;
+    var lastFill = clock.elapsed;
+    Future<String?> fill() async {
       final r = await b.evaluate(session, _fillJs(spotifyLink));
+      if (r is String) {
+        fills++;
+        lastFill = clock.elapsed;
+      }
       return r is String ? r : null;
-    }, linkBoxWait);
+    }
+
+    final startPath = await poll<String>(fill, linkBoxWait);
     log('link entered and submitted (page path $startPath)');
     if (startPath == null) {
       throw const SpotsaverException('spotsaver.net looks different than expected (no link box)');
@@ -282,7 +296,22 @@ Future<File> downloadWithSpotsaver(
         lastSeen = seen;
         log('page: $seen');
       }
-      if (r['path'] == startPath) return null; // the results page is not open yet
+      if (r['path'] == startPath) {
+        // The results page is not open yet. A page that was not ready for the form (fast
+        // browsers are ready for it before the page's scripts are) drops the first submit
+        // and reloads: the link is then sent again, at once when the box is empty, or when
+        // nothing has happened for [resubmitAfter].
+        if (fills < 3) {
+          final waited = clock.elapsed - lastFill;
+          final emptied =
+              waited > const Duration(seconds: 1) && await b.evaluate(session, _boxEmptyJs) == true;
+          if (emptied || waited > resubmitAfter) {
+            log('still on the start page, sending the link again');
+            await fill();
+          }
+        }
+        return null;
+      }
       if (button is! Map) return null;
       return (text: '${button['text']}', disabled: button['disabled'] == true);
     }

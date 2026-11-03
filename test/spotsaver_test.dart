@@ -32,13 +32,15 @@ class FakeSite {
   FakeSite(this.mode);
 
   /// ok, html (the file is a web page), failed, slow (never finishes converting), nobox,
-  /// nobutton.
+  /// nobutton, late (the first load of the home page is not ready for the form for 2.5 s:
+  /// a submit before that is a plain page load, as on a real page that is not hydrated yet).
   final String mode;
   late HttpServer server;
   final paths = <String>[];
   final links = <String>[];
   var earlyClicks = 0;
   var decoyClicks = 0;
+  var homeLoads = 0;
   Uri get base => Uri.parse('http://127.0.0.1:${server.port}/');
 
   Future<void> start() async {
@@ -48,6 +50,7 @@ class FakeSite {
       final r = req.response;
       switch (req.uri.path) {
         case '/':
+          final notReady = mode == 'late' && ++homeLoads == 1;
           r.headers.contentType = ContentType.html;
           r.write(
             mode == 'nobox'
@@ -55,11 +58,14 @@ class FakeSite {
                 : '''<!doctype html><html><head><title>SpotSaver fake</title></head><body>
 <form id="f"><input type="text" id="q"><button type="submit">Go</button></form>
 <script>
-document.getElementById('f').addEventListener('submit', function (e) {
-  e.preventDefault();
-  sessionStorage.setItem('q', document.getElementById('q').value);
-  location.href = '/results/';
-});
+function ready() {
+  document.getElementById('f').addEventListener('submit', function (e) {
+    e.preventDefault();
+    sessionStorage.setItem('q', document.getElementById('q').value);
+    location.href = '/results/';
+  });
+}
+${notReady ? 'setTimeout(ready, 2500);' : 'ready();'}
 </script></body></html>''',
           );
         case '/results/':
@@ -246,6 +252,16 @@ void main() {
       expect(text, contains('done: saved as download.mp3'));
       expect(text, contains('closing the browser'));
       expect(logs.every((l) => l.startsWith('spotsaver +')), isTrue);
+      expectBrowserGone();
+    }, skip: noBrowser, timeout: const Timeout(Duration(seconds: 90)));
+
+    test('a_page_not_ready_for_the_form_gets_the_link_again', () async {
+      await startSite('late');
+      final file = await run();
+      expect(file.readAsBytesSync(), tinyMp3);
+      expect(site.links, [link]);
+      expect(site.homeLoads, greaterThan(1), reason: 'the first submit reloaded the page');
+      expect(logs.join('\n'), contains('still on the start page, sending the link again'));
       expectBrowserGone();
     }, skip: noBrowser, timeout: const Timeout(Duration(seconds: 90)));
 
