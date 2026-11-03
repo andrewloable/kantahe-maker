@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kantahe_maker/screens/settings_screen.dart';
+import 'package:kantahe_maker/settings.dart';
 import 'package:kantahe_maker/tools.dart';
 
 class Calls {
@@ -105,6 +106,105 @@ void main() {
     await tester.pumpAndSettle();
     expect(c.delete, 1);
     expect(c.status, 2, reason: 'refreshed after deleting');
+  });
+
+  group('graphics card switch', () {
+    final switchKey = find.byKey(const ValueKey('graphics-card'));
+
+    /// A settings screen with the switch, and what it did.
+    Future<({List<bool> saved, List<String> calls})> pumpGraphics(
+      WidgetTester tester, {
+      bool? show = true,
+      bool saved = false,
+      bool hasSupport = false,
+      bool installs = true,
+      Object? installError,
+    }) async {
+      final out = (saved: <bool>[], calls: <String>[]);
+      await tester.binding.setSurfaceSize(const Size(900, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(MaterialApp(
+        home: SettingsScreen(
+          status: () async => {'ffmpeg': null, 'ffprobe': null, 'uv': null, 'audio-separator': null, 'model': null},
+          showGraphicsCard: show,
+          loadSettings: () async => AppSettings(useGraphicsCard: saved),
+          saveSettings: (settings) async => out.saved.add(settings.useGraphicsCard),
+          hasGraphicsSupport: () async {
+            out.calls.add('has');
+            return hasSupport;
+          },
+          installGraphics: (context) async {
+            out.calls.add('install');
+            if (installError != null) throw installError;
+            return installs;
+          },
+        ),
+      ));
+      await tester.pumpAndSettle();
+      return out;
+    }
+
+    bool isOn(WidgetTester tester) => tester.widget<SwitchListTile>(switchKey).value;
+
+    testWidgets('off_by_default', (tester) async {
+      await pumpGraphics(tester);
+      expect(switchKey, findsOneWidget);
+      expect(find.text('Use the graphics card'), findsOneWidget);
+      expect(isOn(tester), isFalse);
+    });
+
+    testWidgets('hidden_where_there_is_no_directml', (tester) async {
+      await pumpGraphics(tester, show: false);
+      expect(switchKey, findsNothing);
+    });
+
+    testWidgets('shows_what_was_saved', (tester) async {
+      await pumpGraphics(tester, saved: true);
+      expect(isOn(tester), isTrue);
+    });
+
+    testWidgets('turning_on_downloads_the_support_first', (tester) async {
+      final r = await pumpGraphics(tester);
+      await tester.tap(switchKey);
+      await tester.pumpAndSettle();
+      expect(r.calls, ['has', 'install']);
+      expect(r.saved, [true]);
+      expect(isOn(tester), isTrue);
+    });
+
+    testWidgets('turning_on_skips_the_download_when_it_is_there', (tester) async {
+      final r = await pumpGraphics(tester, hasSupport: true);
+      await tester.tap(switchKey);
+      await tester.pumpAndSettle();
+      expect(r.calls, ['has']);
+      expect(r.saved, [true]);
+    });
+
+    testWidgets('declining_the_download_leaves_it_off', (tester) async {
+      final r = await pumpGraphics(tester, installs: false);
+      await tester.tap(switchKey);
+      await tester.pumpAndSettle();
+      expect(r.saved, isEmpty);
+      expect(isOn(tester), isFalse);
+    });
+
+    testWidgets('a_failed_download_leaves_it_off_and_says_why', (tester) async {
+      final r = await pumpGraphics(tester, installError: 'no network');
+      await tester.tap(switchKey);
+      await tester.pumpAndSettle();
+      expect(r.saved, isEmpty);
+      expect(isOn(tester), isFalse);
+      expect(find.text('no network'), findsOneWidget);
+    });
+
+    testWidgets('turning_off_only_saves', (tester) async {
+      final r = await pumpGraphics(tester, saved: true);
+      await tester.tap(switchKey);
+      await tester.pumpAndSettle();
+      expect(r.calls, isEmpty);
+      expect(r.saved, [false]);
+      expect(isOn(tester), isFalse);
+    });
   });
 
   group('openFolderCommand', () {

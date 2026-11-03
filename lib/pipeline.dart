@@ -63,13 +63,21 @@ List<String> sourceWavArgs(String input, String out) => [
       '-f', 'wav', out,
     ];
 
-/// audio-separator: only the instrumental stem, as WAV, written into [outDir].
-List<String> separateArgs(String wav, String outDir, String modelDir) => [
+/// audio-separator: only the instrumental stem, as WAV, written into [outDir]. With
+/// [graphicsCard] the work is done by the graphics card (DirectML).
+List<String> separateArgs(
+  String wav,
+  String outDir,
+  String modelDir, {
+  bool graphicsCard = false,
+}) =>
+    [
       wav,
       '--model_filename', separatorModel,
       '--model_file_dir', modelDir,
       '--output_dir', outDir,
       '--output_format', 'WAV',
+      if (graphicsCard) '--use_directml',
     ];
 
 /// Every MP3 made from a stem is brought to this integrated loudness (EBU R128), so
@@ -402,8 +410,25 @@ class SeparationJob implements CancellableJob {
         if (sep.existsSync()) await sep.delete(recursive: true);
       });
       sep.createSync(recursive: true);
-      await _exec(_t.separator,
-          separateArgs(p.join(_work.path, 'source.wav'), sep.path, _t.modelDir));
+      final source = p.join(_work.path, 'source.wav');
+      if (_t.useGraphicsCard) {
+        try {
+          await _exec(_t.separator,
+              separateArgs(source, sep.path, _t.modelDir, graphicsCard: true));
+        } on ProcessFailure {
+          if (_cancelled) rethrow;
+          // A graphics card or driver that cannot do it must not stop the song: the
+          // processor does it again, from a clean folder.
+          _onLine?.call('The graphics card did not work; using the processor instead');
+          await retryBusy(() async {
+            if (sep.existsSync()) await sep.delete(recursive: true);
+          });
+          sep.createSync(recursive: true);
+          await _exec(_t.separator, separateArgs(source, sep.path, _t.modelDir));
+        }
+      } else {
+        await _exec(_t.separator, separateArgs(source, sep.path, _t.modelDir));
+      }
       final instrumental = findInstrumental(sep);
       final vocals = findVocals(sep);
       if (instrumental == null || vocals == null) {

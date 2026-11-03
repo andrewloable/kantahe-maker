@@ -65,7 +65,7 @@ Click **New song** and pick an audio or video file (an .mp3 or .mp4, for example
 Your songs stay on your computer. The app sends only a few words, only to these services, and each step shows what it sends:
 
 - **Details:** the title and artist (or the file name) go to musicbrainz.org.
-- **Lyrics:** the title and artist go to lrclib.net, and to lyrics.ovh when lrclib.net finds nothing.
+- **Lyrics:** the title and artist go to lrclib.net, and to lyrics.ovh when lrclib.net finds nothing. If lrclib.net has a server problem, the app tries again up to 5 times; then a link offers a Google search for the lyrics in your browser. The title and artist go to Google only when you click that link.
 - **Spotify link (optional):** the link you paste goes to open.spotify.com, to read the title, artist and length; those then go to musicbrainz.org and lrclib.net as above.
 - **New song from a Spotify link (robot icon):** the same, and spotsaver.net is opened in a Chrome or Edge window that opens minimized for a few seconds with your link, as if you used the site yourself; it sends back the MP3.
 - **Tools:** with your consent, about 1.4 GB once (see Download).
@@ -76,7 +76,7 @@ Nothing else leaves your computer. There is no account.
 
 **Which files can I use?** Audio or video files: .mp3, .mp4, .m4a, .mkv, .webm, .wav and .flac.
 
-**How long does vocal splitting take?** It depends on your computer and the song. It runs in the background, so you can fill in the details and lyrics meanwhile.
+**How long does vocal splitting take?** It depends on your computer and the song. It runs in the background, so you can fill in the details and lyrics meanwhile. On Windows, Settings has a switch, **Use the graphics card** (off by default), that runs it on the graphics card (NVIDIA, AMD or Intel, through DirectML). The first time it downloads about 650 MB more. On one test song (4:12, RTX 3080) the whole step went from about 104 s to 47 s. If the graphics card cannot be used, the processor is used instead.
 
 **Where does the audio of a Spotify link come from?** The robot icon next to "New song" asks for a Spotify song link and does the rest: spotsaver.net converts a YouTube video of the song to MP3 in a Chrome or Edge window that opens minimized for a few seconds, the details and lyrics come from the link, and the song opens ready for vocal splitting. It is not Spotify's audio, so quality and version can differ. It needs Google Chrome or Microsoft Edge installed. Use it only for songs you have the right to use.
 

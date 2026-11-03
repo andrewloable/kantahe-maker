@@ -34,6 +34,17 @@ const busy =
     '"name":"ServerOverloaded","statusCode":503}';
 
 void main() {
+  test('google_search_address', () {
+    expect(
+      googleLyricsUri('Song  One', 'The Artist').toString(),
+      'https://www.google.com/search?q=Song+One+The+Artist+lyrics',
+    );
+    expect(googleLyricsUri('Song', '').toString(), 'https://www.google.com/search?q=Song+lyrics');
+    // Characters that mean something in an address are escaped.
+    expect(googleLyricsUri('Q&A = 100%', 'x').queryParameters['q'], 'Q&A = 100% x lyrics');
+    expect(googleLyricsUri('Q&A', 'x').toString(), contains('q=Q%26A'));
+  });
+
   group('lyricsSearchUri', () {
     test('search_uri_encodes', () {
       final u = lyricsSearchUri('Rock & Roll', 'Beyoncé');
@@ -374,6 +385,37 @@ void main() {
           ),
         ),
       );
+    });
+
+    test('server_errors_carry_the_status', () async {
+      Future<LyricsLookupException> failure() async {
+        try {
+          await findLyrics('t', 'a', base: base);
+        } on LyricsLookupException catch (e) {
+          return e;
+        }
+        fail('no error');
+      }
+
+      status = 503;
+      body = busy;
+      var e = await failure();
+      expect((e.statusCode, e.isServerError), (503, true));
+      status = 502;
+      body = 'bad gateway';
+      e = await failure();
+      expect((e.statusCode, e.isServerError), (502, true));
+      status = 400;
+      body = '{"message":"bad request"}';
+      e = await failure();
+      expect((e.message, e.statusCode, e.isServerError), ('bad request', 400, false));
+      // The status in the body counts when the HTTP line is a 200 (a busy error that came that way).
+      status = 200;
+      body = busy;
+      e = await failure();
+      expect((e.statusCode, e.isServerError), (503, true));
+      // Errors that are no answer of the server have no status and are not retried.
+      expect(const LyricsLookupException('offline').isServerError, isFalse);
     });
 
     test('find_http_error', () async {

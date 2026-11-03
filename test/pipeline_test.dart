@@ -118,6 +118,13 @@ void main() {
     expect(hasSeq(a, ['--output_dir', '/w/sep']), isTrue);
     expect(hasSeq(a, ['--output_format', 'WAV']), isTrue);
     expect(a, isNot(contains('--single_stem')));
+    expect(a, isNot(contains('--use_directml')), reason: 'the processor unless asked');
+  });
+
+  test('args_separate_graphics_card', () {
+    final a = separateArgs('/w/source.wav', '/w/sep', '/t/models', graphicsCard: true);
+    expect(a.last, '--use_directml');
+    expect(a.first, '/w/source.wav');
   });
 
   test('args_measure_loudness', () {
@@ -324,11 +331,15 @@ void main() {
       ? 'needs a POSIX shell'
       : (noFfmpeg == false ? false : noFfmpeg);
 
-  ToolPaths realTools({String separator = '/nonexistent/sep'}) => ToolPaths(
+  ToolPaths realTools({
+    String separator = '/nonexistent/sep',
+    bool useGraphicsCard = false,
+  }) => ToolPaths(
     ffmpeg: ffmpegPath ?? '/nonexistent/ffmpeg',
     ffprobe: ffprobePath ?? '/nonexistent/ffprobe',
     separator: separator,
     modelDir: '/nonexistent/models',
+    useGraphicsCard: useGraphicsCard,
   );
 
   void ff(List<String> args) {
@@ -718,6 +729,76 @@ cp "__V__" "$out/x_(Vocals)_m.wav"
       expect(args, contains('${work.path}/source.wav'));
       expect(args, isNot(contains('--single_stem')));
     }, skip: noShOrFfmpeg);
+
+    test('separate_graphics_card_passes_the_flag', () async {
+      final wav = '${tmp.path}/fixture.wav';
+      ff(['-f', 'lavfi', '-i', 'sine=frequency=440:duration=1', '-ac', '2', '-ar', '44100', wav]);
+      final job = separate(
+        realTools(separator: copyingSeparator(wav), useGraphicsCard: true),
+        work,
+      );
+      await job.done;
+      final calls = File(sepLog).readAsLinesSync().where((l) => l.contains('--output_dir'));
+      expect(calls, hasLength(1));
+      expect(calls.single, endsWith('--use_directml'));
+      expect(File('${work.path}/instrumental.mp3').existsSync(), isTrue);
+    }, skip: noShOrFfmpeg);
+
+    test('separate_graphics_card_failure_falls_back_to_the_processor', () async {
+      final wav = '${tmp.path}/fixture.wav';
+      ff(['-f', 'lavfi', '-i', 'sine=frequency=440:duration=1', '-ac', '2', '-ar', '44100', wav]);
+      // Fails after leaving a partial file, like a graphics card that breaks half way.
+      final sep = _fakeScript(
+        tmp.path,
+        'gpusep',
+        r'''
+echo "$*" >> __LOG__
+while [ $# -gt 0 ]; do
+  if [ "$1" = "--output_dir" ]; then out="$2"; fi
+  if [ "$1" = "--use_directml" ]; then
+    echo "partial" > "$out/x_(Instrumental)_m.wav"
+    echo "DirectML device lost" >&2
+    exit 3
+  fi
+  shift
+done
+cp "__WAV__" "$out/x_(Instrumental)_m.wav"
+cp "__WAV__" "$out/x_(Vocals)_m.wav"
+'''
+            .replaceAll('__LOG__', sepLog)
+            .replaceAll('__WAV__', wav),
+      );
+      final lines = <String>[];
+      final job = separate(
+        realTools(separator: sep, useGraphicsCard: true),
+        work,
+        onLine: lines.add,
+      );
+      await job.done;
+      final calls = File(sepLog).readAsLinesSync();
+      expect(calls, hasLength(2));
+      expect(calls[0], endsWith('--use_directml'));
+      expect(calls[1], isNot(contains('--use_directml')));
+      expect(lines, contains('The graphics card did not work; using the processor instead'));
+      expect(File('${work.path}/instrumental.mp3').existsSync(), isTrue);
+      expect(File('${work.path}/vocals.mp3').existsSync(), isTrue);
+      expect(Directory('${work.path}/sep').existsSync(), isFalse);
+    }, skip: noShOrFfmpeg);
+
+    test('separate_processor_failure_is_not_retried', () async {
+      final sep = _fakeScript(
+        tmp.path,
+        'sep',
+        r'''
+echo "$*" >> __LOG__
+exit 2
+'''
+            .replaceAll('__LOG__', sepLog),
+      );
+      final job = separate(realTools(separator: sep), work);
+      await expectLater(job.done, throwsA(isA<ProcessFailure>()));
+      expect(File(sepLog).readAsLinesSync(), hasLength(1));
+    }, skip: noSh);
 
     test('separate_cancel', () async {
       const marker = '3000.31';

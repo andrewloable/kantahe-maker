@@ -673,6 +673,28 @@ void main() {
       ]);
     }, skip: noSh);
 
+    test('install_separator_graphics_card_args', () async {
+      // The DirectML extra, over an install that is already there (--force).
+      final uv = _script(tmp.path, 'uv', _fakeUv(log.path, checkEnv: true));
+      _script(tools.bin, 'audio-separator', _fakeSeparator(log.path));
+      await installSeparator(uv, tools, HostOs.linux, graphicsCard: true);
+      expect(log.readAsLinesSync().first,
+          'uv tool install --managed-python --python $pythonVersion '
+          '--with audioread --force audio-separator[dml]==$audioSeparatorVersion');
+    }, skip: noSh);
+
+    test('graphics_support_is_read_from_the_uv_receipt', () {
+      final receipt = File('${tools.uvTools}/audio-separator/uv-receipt.toml');
+      expect(separatorHasGraphicsSupport(tools), isFalse, reason: 'nothing installed');
+      receipt.createSync(recursive: true);
+      receipt.writeAsStringSync(
+          'requirements = [{ name = "audio-separator", extras = ["cpu"], specifier = "==1" }]');
+      expect(separatorHasGraphicsSupport(tools), isFalse);
+      receipt.writeAsStringSync(
+          'requirements = [{ name = "audio-separator", extras = ["dml"], specifier = "==1" }]');
+      expect(separatorHasGraphicsSupport(tools), isTrue);
+    });
+
     test('install_separator_puts_ffmpeg_on_path', () async {
       // audio-separator runs the bare name ffmpeg, so its folder must be on PATH.
       final uv = _script(
@@ -738,6 +760,20 @@ chmod +x "$UV_TOOL_BIN_DIR/audio-separator"
         'model': null,
       });
       expect(res(), isNull);
+    });
+
+    test('resolve_graphics_card_only_on_windows', () {
+      for (final n in ['ffmpeg', 'ffprobe', 'audio-separator']) {
+        touch('${tools.bin}/$n');
+        touch('${tools.bin}/$n.exe');
+      }
+      touch('${tools.models}/$separatorModel');
+      ToolPaths? r(HostOs os, {bool gpu = false}) => resolve(
+          tools, os, const {'PATH': ''}, extraDirs: const [], useGraphicsCard: gpu);
+      expect(r(HostOs.windows)!.useGraphicsCard, isFalse, reason: 'off unless asked');
+      expect(r(HostOs.windows, gpu: true)!.useGraphicsCard, isTrue);
+      expect(r(HostOs.linux, gpu: true)!.useGraphicsCard, isFalse, reason: 'DirectML is Windows only');
+      expect(r(HostOs.macos, gpu: true)!.useGraphicsCard, isFalse);
     });
 
     test('resolve_present', () {

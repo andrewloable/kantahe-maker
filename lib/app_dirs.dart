@@ -12,5 +12,8 @@ import 'tools.dart';
 Future<Directory> appProjectsRoot() async =>
     Directory(p.join((await getApplicationSupportDirectory()).path, 'projects'));
 
+Future<File> appSettingsFile() async =>
+    File(p.join((await getApplicationSupportDirectory()).path, 'settings.json'));
+
 Future<ToolsDir> appToolsDir() async =>
     ToolsDir(p.join((await getApplicationSupportDirectory()).path, 'tools'));

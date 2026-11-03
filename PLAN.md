@@ -146,8 +146,13 @@ test/                    one *_test.dart per lib file; pure logic first, widget 
   own STFT and inference code would be much more code. Revisit if the size of the Python
   setup (several hundred MB to about 1 GB because of torch) gets complaints. The replacement
   would be the `onnxruntime` FFI package plus a Dart STFT for MDX-Net.
-- **Separation runs on the CPU in the MVP.** GPU support (the `[gpu]` extra on NVIDIA,
-  CoreML on Apple Silicon) waits until speed becomes a problem.
+- **Separation runs on the CPU unless the user turns on the graphics card (Windows only).**
+  The Settings switch "Use the graphics card" (`settings.json`, off by default) installs
+  `audio-separator[dml]` (DirectML, about 650 MB more, `uv tool install --force`) and starts the
+  separator with `--use_directml`. If that run fails, the same song is split again on the
+  processor. `audio-separator` ignores `--use_directml` without the DirectML packages and runs on the
+  CPU. CUDA (`[gpu]`) was not tried: it needs CUDA builds of torch (about 2.5 GB) and DirectML
+  already runs on NVIDIA cards. CoreML on Apple Silicon is not switched on by the app.
 - **Timing is per line in the MVP.** Word-level tapping is a separate later task. The player
   already handles line-only LRC.
 - **The macOS App Sandbox is turned off.** The app runs binaries it downloaded, and the

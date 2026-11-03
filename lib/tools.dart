@@ -118,11 +118,15 @@ String? expectedSha256(String checksumText, String fileName) {
 /// Where the tools the pipeline needs are.
 class ToolPaths {
   final String ffmpeg, ffprobe, separator, modelDir;
+
+  /// Vocal splitting runs on the graphics card: the user's setting, on Windows only.
+  final bool useGraphicsCard;
   const ToolPaths({
     required this.ffmpeg,
     required this.ffprobe,
     required this.separator,
     required this.modelDir,
+    this.useGraphicsCard = false,
   });
 }
 
@@ -371,14 +375,28 @@ Future<void> runLogged(
   if (code != 0) throw ProcessFailure(code, List.unmodifiable(last));
 }
 
+/// Whether audio-separator was installed with the DirectML extra, which the graphics card
+/// needs. uv writes the extras it installed into the receipt of the tool.
+bool separatorHasGraphicsSupport(ToolsDir d) {
+  try {
+    final receipt = File(p.join(d.uvTools, 'audio-separator', 'uv-receipt.toml'));
+    return receipt.readAsStringSync().contains('"dml"');
+  } on FileSystemException {
+    return false;
+  }
+}
+
 /// Installs audio-separator with uv (uv downloads its own Python, so none is needed
 /// on the machine) and then downloads the model. Everything stays in the tools folder.
-/// With [ffmpeg], its folder is put on PATH for the programs that run.
+/// With [ffmpeg], its folder is put on PATH for the programs that run. With
+/// [graphicsCard] the DirectML extra is installed instead of the processor one (about
+/// 650 MB more), also over an install that is already there.
 Future<void> installSeparator(
   String uvPath,
   ToolsDir d,
   HostOs os, {
   String? ffmpeg,
+  bool graphicsCard = false,
   void Function(String line)? onLine,
 }) async {
   final env = {
@@ -394,7 +412,8 @@ Future<void> installSeparator(
       '--python',
       pythonVersion,
       for (final package in separatorExtraPackages) ...['--with', package],
-      'audio-separator[cpu]==$audioSeparatorVersion',
+      if (graphicsCard) '--force',
+      'audio-separator[${graphicsCard ? 'dml' : 'cpu'}]==$audioSeparatorVersion',
     ],
     environment: env,
     onLine: onLine,
@@ -444,6 +463,7 @@ ToolPaths? resolve(
   HostOs os,
   Map<String, String> env, {
   List<String>? extraDirs,
+  bool useGraphicsCard = false,
 }) {
   final s = toolStatus(d, os, env, extraDirs: extraDirs);
   final ffmpeg = s['ffmpeg'], ffprobe = s['ffprobe'], separator = s['audio-separator'];
@@ -451,7 +471,12 @@ ToolPaths? resolve(
     return null;
   }
   return ToolPaths(
-      ffmpeg: ffmpeg, ffprobe: ffprobe, separator: separator, modelDir: d.models);
+      ffmpeg: ffmpeg,
+      ffprobe: ffprobe,
+      separator: separator,
+      modelDir: d.models,
+      // DirectML exists on Windows only.
+      useGraphicsCard: useGraphicsCard && os == HostOs.windows);
 }
 
 // ------------------------------------------------------------------- install
@@ -475,6 +500,7 @@ Future<void> installTools(
   void Function(String line)? onLine,
   HttpClient? client,
   Duration idleTimeout = const Duration(seconds: 60),
+  bool graphicsCard = false,
 }) async {
   env ??= Platform.environment;
   extraDirs ??= defaultExtraDirs(os);
@@ -502,6 +528,7 @@ Future<void> installTools(
   if (after['audio-separator'] == null || after['model'] == null) {
     final uv = after['uv'];
     if (uv == null) throw StateError('uv is missing, cannot install audio-separator');
-    await installSeparator(uv, d, os, ffmpeg: after['ffmpeg'], onLine: onLine);
+    await installSeparator(uv, d, os,
+        ffmpeg: after['ffmpeg'], graphicsCard: graphicsCard, onLine: onLine);
   }
 }

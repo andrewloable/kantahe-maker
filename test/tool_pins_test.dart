@@ -70,7 +70,8 @@ void main() {
   test('licenses_and_sizes', () {
     expect(toolLicenses.length, 5);
     expect(toolLicenses.values.every((v) => v.isNotEmpty), isTrue);
-    expect(approxSizeMb.length, 4);
+    expect(approxSizeMb.length, 5);
+    expect(approxSizeMb['graphics card'], 650);
     expect(approxSizeMb.values.every((v) => v > 0), isTrue);
   });
 

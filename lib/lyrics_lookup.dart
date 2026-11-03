@@ -12,10 +12,22 @@ const lyricsHost = 'lrclib.net';
 
 class LyricsLookupException implements Exception {
   final String message;
-  const LyricsLookupException(this.message);
+
+  /// The HTTP status of the answer, when the failure was an answer of the server.
+  final int? statusCode;
+  const LyricsLookupException(this.message, {this.statusCode});
+
+  /// The server had a problem (502, 503...): trying again in a moment may work.
+  bool get isServerError => (statusCode ?? 0) >= 500;
+
   @override
   String toString() => message;
 }
+
+/// A Google search for the lyrics of [title] by [artist], for when lrclib.net does not answer.
+Uri googleLyricsUri(String title, String artist) => Uri.https('www.google.com', '/search', {
+      'q': [oneLine(title), oneLine(artist), 'lyrics'].where((t) => t.isNotEmpty).join(' '),
+    });
 
 class LyricsCandidate {
   final String title, artist, album, lyrics;
@@ -119,8 +131,11 @@ List<LyricsCandidate> parseLyricsSearch(String body) {
   }
   if (json is Map) {
     final message = json['message'];
+    // LRCLIB repeats the status in the body ("statusCode": 503), which is all there is to go
+    // by when the answer does not carry it in the HTTP line.
+    final code = json['statusCode'];
     throw message is String && message.isNotEmpty
-        ? LyricsLookupException(message)
+        ? LyricsLookupException(message, statusCode: code is int ? code : null)
         : _unexpected;
   }
   if (json is! List) throw _unexpected;
@@ -355,7 +370,10 @@ LyricsLookupException _failure(int status, String body) {
   try {
     parseLyricsSearch(body); // an error object throws its message
   } on LyricsLookupException catch (e) {
-    if (e.message != _unexpected.message) return e;
+    if (e.message != _unexpected.message) {
+      // The server's own number wins when the HTTP line says nothing is wrong.
+      return LyricsLookupException(e.message, statusCode: status >= 500 ? status : e.statusCode ?? status);
+    }
   }
-  return LyricsLookupException('The lyrics server answered HTTP $status');
+  return LyricsLookupException('The lyrics server answered HTTP $status', statusCode: status);
 }

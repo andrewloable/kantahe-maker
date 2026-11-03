@@ -104,10 +104,14 @@ const Map<String, String> toolLicenses = {
 
 /// Approximate download sizes in MB, measured on 2026-10-30: ffmpeg+ffprobe are
 /// 55 MB on macOS and 160-190 MB on Windows/Linux (the biggest is shown); uv 14-15 MB;
-/// Python 70 MB plus the wheels (torch, numpy, ...) about 1.1 GB; the model 64 MB.
+/// Python 70 MB plus the wheels (torch, numpy, ...) about 1.1 GB; the model 64 MB. The
+/// graphics card option (Windows, DirectML: torch 2.4.1 and the DirectML packages instead of
+/// the processor ones) makes the tools folder 650 MB bigger (measured 2026-11-03: 982 MB
+/// -> 1636 MB).
 const Map<String, int> approxSizeMb = {
   'ffmpeg': 190,
   'uv': 15,
   'python+audio-separator': 1100,
   'model': 64,
+  'graphics card': 650,
 };

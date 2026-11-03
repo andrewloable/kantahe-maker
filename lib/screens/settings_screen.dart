@@ -1,10 +1,13 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 
 import '../app_dirs.dart';
 import '../fs_retry.dart';
+import '../settings.dart';
 import '../tools.dart';
+import 'graphics_card_dialog.dart';
 import 'tools_dialog.dart';
 
 /// The command that opens [path] in the system file manager (a program and its
@@ -18,9 +21,9 @@ List<String> openFolderCommand(HostOs os, String path) => switch (os) {
 /// The name shown for a key of [toolStatus].
 String toolLabel(String key) => key == 'model' ? 'Vocal-splitting model' : key;
 
-/// The downloaded tools: where each one is, and buttons to download or repair them,
-/// open their folder and delete them. Everything that touches the machine can be
-/// replaced in tests.
+/// The graphics card switch for vocal splitting, and the downloaded tools: where each one
+/// is, and buttons to download or repair them, open their folder and delete them.
+/// Everything that touches the machine can be replaced in tests.
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({
     super.key,
@@ -28,6 +31,11 @@ class SettingsScreen extends StatefulWidget {
     this.repair,
     this.openFolder,
     this.deleteTools,
+    this.showGraphicsCard,
+    this.loadSettings,
+    this.saveSettings,
+    this.hasGraphicsSupport,
+    this.installGraphics,
   });
 
   final Future<Map<String, String?>> Function()? status;
@@ -35,12 +43,71 @@ class SettingsScreen extends StatefulWidget {
   final Future<void> Function()? openFolder;
   final Future<void> Function()? deleteTools;
 
+  /// Whether the graphics card switch is shown; null means on Windows only (DirectML).
+  final bool? showGraphicsCard;
+  final Future<AppSettings> Function()? loadSettings;
+  final Future<void> Function(AppSettings settings)? saveSettings;
+
+  /// Whether the graphics card support is downloaded already.
+  final Future<bool> Function()? hasGraphicsSupport;
+
+  /// Downloads the graphics card support (asking first); true when it is installed.
+  final Future<bool> Function(BuildContext context)? installGraphics;
+
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
   late Future<Map<String, String?>> _status = _loadStatus();
+  bool _useGraphicsCard = false;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_loadGraphicsCard());
+  }
+
+  bool get _showGraphicsCard =>
+      widget.showGraphicsCard ?? parseHost(Platform.version).$1 == HostOs.windows;
+
+  Future<void> _loadGraphicsCard() async {
+    if (!_showGraphicsCard) return;
+    try {
+      final settings = await (widget.loadSettings ?? _defaultLoadSettings)();
+      if (mounted) setState(() => _useGraphicsCard = settings.useGraphicsCard);
+    } catch (_) {
+      // The switch stays off.
+    }
+  }
+
+  static Future<AppSettings> _defaultLoadSettings() async =>
+      readSettings(await appSettingsFile());
+
+  static Future<void> _defaultSaveSettings(AppSettings settings) async =>
+      writeSettings(await appSettingsFile(), settings);
+
+  static Future<bool> _defaultHasGraphicsSupport() async =>
+      separatorHasGraphicsSupport(await appToolsDir());
+
+  /// Turning it on first downloads the support when it is not there; the switch stays off
+  /// when that is declined or fails. Turning it off only stops using it.
+  Future<void> _setGraphicsCard(bool on) async {
+    try {
+      if (on && !await (widget.hasGraphicsSupport ?? _defaultHasGraphicsSupport)()) {
+        if (!mounted) return;
+        final installed = await (widget.installGraphics ?? showGraphicsCardDialog)(context);
+        if (!installed) return;
+      }
+      await (widget.saveSettings ?? _defaultSaveSettings)(AppSettings(useGraphicsCard: on));
+      if (mounted) setState(() => _useGraphicsCard = on);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      }
+    }
+    if (mounted) _refresh();
+  }
 
   Future<Map<String, String?>> _loadStatus() => (widget.status ?? _defaultStatus)();
 
@@ -115,6 +182,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          if (_showGraphicsCard) ...[
+            Text('Vocal splitting', style: Theme.of(context).textTheme.titleMedium),
+            SwitchListTile(
+              key: const ValueKey('graphics-card'),
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Use the graphics card'),
+              subtitle: const Text('Much faster on most computers. The first time it downloads '
+                  'about 650 MB more. If the graphics card cannot be used, the processor is '
+                  'used instead. Off by default.'),
+              value: _useGraphicsCard,
+              onChanged: _setGraphicsCard,
+            ),
+            const SizedBox(height: 16),
+          ],
           Text('Tools', style: Theme.of(context).textTheme.titleMedium),
           FutureBuilder<Map<String, String?>>(
             future: _status,

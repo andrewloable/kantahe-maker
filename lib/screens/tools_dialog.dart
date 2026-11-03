@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import '../app_dirs.dart';
+import '../settings.dart';
 import '../tool_pins.dart';
 import '../tools.dart';
 
@@ -45,7 +46,9 @@ List<ToolItem> toolItems(HostOs os, HostArch arch) {
 
 Future<ToolPaths?> defaultResolve() async {
   final (os, _) = parseHost(Platform.version);
-  return resolve(await appToolsDir(), os, Platform.environment);
+  final settings = await readSettings(await appSettingsFile());
+  return resolve(await appToolsDir(), os, Platform.environment,
+      useGraphicsCard: settings.useGraphicsCard);
 }
 
 Future<void> defaultInstall(
@@ -53,8 +56,11 @@ Future<void> defaultInstall(
   void Function(String file, int received, int? total) onProgress,
 ) async {
   final (os, arch) = parseHost(Platform.version);
+  final settings = await readSettings(await appSettingsFile());
   await installTools(await appToolsDir(), os, arch,
-      onLine: onLine, onProgress: onProgress);
+      onLine: onLine,
+      onProgress: onProgress,
+      graphicsCard: settings.useGraphicsCard && os == HostOs.windows);
 }
 
 /// Returns the tools if they are installed. Otherwise asks the user whether to
