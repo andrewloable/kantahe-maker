@@ -64,6 +64,12 @@ caffeinate -disu flutter test integration_test/screenshots_test.dart -d macos \
 - Prefer stdlib (`dart:io` HttpClient, `dart:convert`) over new packages. Current deps are listed
   in `PLAN.md`; adding one needs a reason in the PR/commit.
 - Write files that matter (`.karmp3`, `project.json`) to `*.part` then rename.
+- Tests must pass on macOS, Linux and Windows (CI runs `flutter test` on all three). Compare a
+  path the app builds with `p.join(...)` (package `path`), never a literal `'$dir/name'`: Windows
+  gives backslashes. Widget tests that depend on a platform-only section pin it (for example
+  `showGraphicsCard: true` in the settings tests) so every OS runs the same layout, and use a
+  tall window so buttons are on screen. A test that needs a POSIX shell, `chmod` or ffmpeg is
+  skipped on Windows with a stated reason.
 
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:1105d646 -->
 ## Beads Issue Tracker

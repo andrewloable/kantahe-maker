@@ -19,10 +19,12 @@ class Calls {
 Future<Calls> pumpSettings(WidgetTester tester,
     {Object? statusError, Object? repairError, Object? openError}) async {
   final c = Calls();
-  await tester.binding.setSurfaceSize(const Size(900, 900));
+  // Tall, so every button is on screen with the Windows-only section shown too.
+  await tester.binding.setSurfaceSize(const Size(900, 1800));
   addTearDown(() => tester.binding.setSurfaceSize(null));
   await tester.pumpWidget(MaterialApp(
     home: SettingsScreen(
+      showGraphicsCard: true,
       status: () async {
         c.status++;
         if (statusError != null) throw statusError;

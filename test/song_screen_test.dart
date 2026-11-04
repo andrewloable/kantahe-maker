@@ -2797,7 +2797,7 @@ void main() {
       expect(find.byKey(const ValueKey('preview-line-0')), findsOneWidget);
       expect(find.byKey(const ValueKey('preview-line-1')), findsOneWidget);
       // The song folder's own instrumental, never source.mp3, and no vocals controls.
-      expect(s.player.opened.map((o) => o.path), ['${s.dir.path}/instrumental.mp3']);
+      expect(s.player.opened.map((o) => o.path), [p.join(s.dir.path, 'instrumental.mp3')]);
       expect(find.byKey(const ValueKey('preview-vocals')), findsNothing);
       await closePreview(tester);
       expect(find.byKey(const ValueKey('preview-dialog')), findsNothing);
@@ -2817,7 +2817,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 300));
       expect(
         s.player.opened.map((o) => o.path).toSet(),
-        {'${s.dir.path}/instrumental.mp3', '${s.dir.path}/vocals.mp3'},
+        {p.join(s.dir.path, 'instrumental.mp3'), p.join(s.dir.path, 'vocals.mp3')},
       );
       expect(find.byKey(const ValueKey('preview-vocals')), findsOneWidget);
       await closePreview(tester);
@@ -2835,7 +2835,7 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('export-preview')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));
-      expect(s.player.opened.map((o) => o.path), ['${s.dir.path}/instrumental.mp3']);
+      expect(s.player.opened.map((o) => o.path), [p.join(s.dir.path, 'instrumental.mp3')]);
       expect(find.byKey(const ValueKey('preview-vocals')), findsNothing);
       await closePreview(tester);
     });
