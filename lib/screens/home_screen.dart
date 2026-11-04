@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
@@ -11,12 +10,14 @@ import '../autofill.dart';
 import '../cdp.dart';
 import '../fs_retry.dart';
 import '../jobs.dart';
+import '../karmp3_open.dart';
+import '../karmp3_read.dart';
 import '../mp3_info.dart';
 import '../project.dart';
 import '../spotify_link.dart';
 import '../spotsaver.dart';
 import '../widgets/brand_header.dart';
-import '../windows_dialogs.dart';
+import 'pick_files.dart';
 import 'settings_screen.dart';
 import 'song_screen.dart';
 
@@ -64,6 +65,7 @@ class HomeScreen extends StatefulWidget {
     this.autofill,
     this.readClipboard,
     this.onLog,
+    this.pickKarMp3,
   });
 
   /// The folder that holds one sub-folder per song.
@@ -71,6 +73,9 @@ class HomeScreen extends StatefulWidget {
 
   /// Asks the user for an audio or video file; null if they cancel.
   final Future<String?> Function()? pickFile;
+
+  /// Asks the user for a .karmp3 file to open; null if they cancel.
+  final Future<String?> Function()? pickKarMp3;
 
   /// Opens a song. (The song screen replaces the placeholder default.)
   final void Function(BuildContext context, Directory dir)? onOpen;
@@ -103,11 +108,6 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  static const _mediaTypes = XTypeGroup(
-    label: 'Audio or video',
-    extensions: ['mp3', 'mp4', 'm4a', 'mkv', 'webm', 'wav', 'flac'],
-  );
-
   late Future<List<_Entry>> _entries = _load();
 
   Future<Directory> _root() => (widget.projectsRoot ?? appProjectsRoot)();
@@ -133,17 +133,6 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
-  Future<String?> _defaultPick() async {
-    // Windows: a dialog of its own process, see windows_dialogs.dart.
-    if (Platform.isWindows) {
-      return showWindowsDialog(
-        label: _mediaTypes.label!,
-        extensions: _mediaTypes.extensions!,
-      );
-    }
-    return (await openFile(acceptedTypeGroups: const [_mediaTypes]))?.path;
-  }
-
   void _defaultOpen(BuildContext context, Directory dir) {
     Navigator.of(context)
         .push(MaterialPageRoute<void>(builder: (_) => SongScreen(dir: dir)))
@@ -156,6 +145,39 @@ class _HomeScreenState extends State<HomeScreen> {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
         .showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  /// "Open .karmp3": makes a new song from the karaoke file the user picks (the file itself is
+  /// not touched), then opens it like any song.
+  Future<void> _openKarMp3() async {
+    final String? path;
+    try {
+      path = await (widget.pickKarMp3 ?? pickKarMp3File)();
+    } catch (e) {
+      _showError('Could not open the file dialog: $e');
+      return;
+    }
+    if (path == null) return;
+    final Directory dir;
+    try {
+      final (made, id) = await _makeSongDir();
+      dir = made;
+      await openKarMp3(path, dir, id: id);
+    } on KarMp3Exception catch (e) {
+      // "Could not read <file>: ..." already names the file; the others do not.
+      _showError(
+        e.message.startsWith('Could not read')
+            ? e.message
+            : 'Could not open ${p.basename(path)}: ${e.message}',
+      );
+      return;
+    } catch (e) {
+      _showError('Could not open ${p.basename(path)}: $e');
+      return;
+    }
+    if (!mounted) return;
+    _reload();
+    (widget.onOpen ?? _defaultOpen)(context, dir);
   }
 
   /// The folder (not created yet) and id for a new song.
@@ -173,7 +195,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _newSong() async {
     final String? path;
     try {
-      path = await (widget.pickFile ?? _defaultPick)();
+      path = await (widget.pickFile ?? pickAudioFile)();
     } catch (e) {
       _showError('Could not open the file dialog: $e');
       return;
@@ -266,7 +288,7 @@ class _HomeScreenState extends State<HomeScreen> {
         if (choice != 'choose') return true;
         final String? path;
         try {
-          path = await (widget.pickFile ?? _defaultPick)();
+          path = await (widget.pickFile ?? pickAudioFile)();
         } catch (e) {
           message = 'Could not open the file dialog: $e';
           continue;
@@ -435,6 +457,14 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           const SizedBox(width: 12),
           FloatingActionButton.extended(
+            key: const ValueKey('open-karmp3'),
+            heroTag: 'open-karmp3',
+            onPressed: _openKarMp3,
+            icon: const Icon(Icons.file_open_outlined),
+            label: const Text('Open .karmp3'),
+          ),
+          const SizedBox(width: 12),
+          FloatingActionButton.extended(
             heroTag: 'new-song',
             onPressed: _newSong,
             icon: const Icon(Icons.add),
@@ -463,7 +493,9 @@ class _HomeScreenState extends State<HomeScreen> {
           final entries = snapshot.data!;
           if (entries.isEmpty) {
             return const Center(
-              child: Text('No songs yet. Click "New song" to start.'),
+              child: Text(
+                'No songs yet. Click "New song" to start, or "Open .karmp3" to edit a karaoke file.',
+              ),
             );
           }
           return ListView(

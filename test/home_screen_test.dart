@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kantahe_maker/autofill.dart';
+import 'package:kantahe_maker/export.dart';
 import 'package:kantahe_maker/project.dart';
 import 'package:kantahe_maker/screens/home_screen.dart';
 import 'package:kantahe_maker/screens/song_screen.dart';
@@ -59,6 +60,7 @@ Future<Calls> pumpHome(
   String? clipboard,
   void Function(BuildContext, Directory)? openOverride,
   void Function(String)? onLog,
+  String? karmp3,
 }) async {
   final calls = Calls()..picked = pick;
   await tester.binding.setSurfaceSize(const Size(900, 900));
@@ -83,6 +85,7 @@ Future<Calls> pumpHome(
         autofill: autofill,
         readClipboard: () async => clipboard,
         onLog: onLog,
+        pickKarMp3: () async => karmp3,
       ),
     ),
   );
@@ -835,6 +838,105 @@ void main() {
       await tapKey(tester, 'spotify-dialog-download');
       await settle(tester, until: () => calls.opened.isNotEmpty);
       await settle(tester, until: () => find.textContaining('Tap the timing').evaluate().isNotEmpty);
+    });
+  });
+
+  group('open a .karmp3', () {
+    // A .karmp3 made the way the app makes them (stand-in MP3 bytes, made-up lyrics), in a
+    // folder of its own so it is not mistaken for a song.
+    Future<String> makeKarMp3(WidgetTester tester) async {
+      final aux = Directory.systemTemp.createTempSync('karmp3_src');
+      addTearDown(() => deleteTemp(aux));
+      final work = Directory('${aux.path}/work')..createSync();
+      File('${work.path}/instrumental.mp3').writeAsBytesSync([1, 2, 3]);
+      final dest = '${aux.path}/Singer - Song.karmp3';
+      await tester.runAsync(
+        () => exportKarMp3(
+          SongProject(id: 'x', inputPath: '/x/in.mp3')
+            ..title = 'Song'
+            ..artist = 'Singer'
+            ..lyrics = 'la la\nna na'
+            ..times = [1.0, 2.5],
+          work,
+          dest,
+          durationSeconds: 60,
+        ),
+      );
+      return dest;
+    }
+
+    testWidgets('open_karmp3_creates_a_song', (tester) async {
+      final root = await makeRoot(tester);
+      final file = await makeKarMp3(tester);
+      final calls = await pumpHome(tester, root, karmp3: file);
+      await tester.tap(find.byKey(const ValueKey('open-karmp3')));
+      await settle(tester, until: () => calls.opened.isNotEmpty);
+      final dirs = root.listSync().whereType<Directory>().toList();
+      expect(dirs, hasLength(1));
+      final j = readProject(dirs.single);
+      expect((j['title'], j['artist']), ('Song', 'Singer'));
+      expect(j['karmp3Path'], file);
+      expect(j['audioFromKarmp3'], isTrue);
+      expect(j['lyrics'], 'la la\nna na');
+      expect(File(p.join(dirs.single.path, 'instrumental.mp3')).readAsBytesSync(), [1, 2, 3]);
+      expect(calls.opened, [p.basename(dirs.single.path)]);
+    });
+
+    testWidgets('open_karmp3_cancel_does_nothing', (tester) async {
+      final root = await makeRoot(tester);
+      final calls = await pumpHome(tester, root, karmp3: null);
+      await tester.tap(find.byKey(const ValueKey('open-karmp3')));
+      await settle(tester);
+      expect(root.listSync(), isEmpty);
+      expect(calls.opened, isEmpty);
+    });
+
+    testWidgets('open_karmp3_bad_file_shows_message', (tester) async {
+      final root = await makeRoot(tester);
+      final aux = Directory.systemTemp.createTempSync('karmp3_bad');
+      addTearDown(() => deleteTemp(aux));
+      final bad = File('${aux.path}/bad.karmp3')..writeAsStringSync('not a zip');
+      final calls = await pumpHome(tester, root, karmp3: bad.path);
+      await tester.tap(find.byKey(const ValueKey('open-karmp3')));
+      await settle(
+        tester,
+        until: () => find
+            .textContaining('Could not open bad.karmp3: This is not a .karmp3 file')
+            .evaluate()
+            .isNotEmpty,
+      );
+      expect(root.listSync(), isEmpty, reason: 'no folder is left');
+      expect(calls.opened, isEmpty);
+    });
+
+    testWidgets('open_karmp3_missing_file_message_is_not_doubled', (tester) async {
+      final root = await makeRoot(tester);
+      final calls = await pumpHome(tester, root, karmp3: '${root.path}/../gone.karmp3');
+      await tester.tap(find.byKey(const ValueKey('open-karmp3')));
+      await settle(
+        tester,
+        until: () => find.textContaining('Could not read gone.karmp3').evaluate().isNotEmpty,
+      );
+      expect(find.textContaining('Could not open'), findsNothing);
+      expect(root.listSync(), isEmpty, reason: 'no folder is left');
+      expect(calls.opened, isEmpty);
+    });
+
+    testWidgets('empty_text_mentions_open', (tester) async {
+      final root = await makeRoot(tester);
+      await pumpHome(tester, root);
+      expect(
+        find.text('No songs yet. Click "New song" to start, or "Open .karmp3" to edit a karaoke file.'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('new_song_button_is_still_there', (tester) async {
+      final root = await makeRoot(tester);
+      await pumpHome(tester, root);
+      expect(find.text('New song'), findsOneWidget);
+      expect(find.byKey(const ValueKey('new-from-spotify')), findsOneWidget);
+      expect(find.text('Open .karmp3'), findsOneWidget);
     });
   });
 }

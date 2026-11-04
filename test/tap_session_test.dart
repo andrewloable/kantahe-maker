@@ -250,17 +250,18 @@ void main() {
       expect(splitWords('Hello  big world').join(), 'Hello big world');
     });
 
-    test('word_stamp_first_word_takes_the_line_time', () {
+    test('word_stamp_first_call_times_the_first_word', () {
       final s = hello()..wordStamp(0, 1.4);
-      expect(s.wordTimes[0], [1.0, 1.4, null]);
+      expect(s.wordTimes[0], [1.4, null, null]);
+      expect(s.times, [1, 2], reason: 'the line tap stays');
       expect(s.wordTimes[1], isNull);
     });
 
     test('word_stamp_fills_in_order_and_stops_when_full', () {
-      final s = hello()..wordStamp(0, 1.4)..wordStamp(0, 1.9);
-      expect(s.wordTimes[0], [1.0, 1.4, 1.9]);
+      final s = hello()..wordStamp(0, 1.4)..wordStamp(0, 1.9)..wordStamp(0, 2.3);
+      expect(s.wordTimes[0], [1.4, 1.9, 2.3]);
       s.wordStamp(0, 5);
-      expect(s.wordTimes[0], [1.0, 1.4, 1.9]);
+      expect(s.wordTimes[0], [1.4, 1.9, 2.3]);
     });
 
     test('word_stamp_needs_a_tapped_line', () {
@@ -268,17 +269,17 @@ void main() {
       expect(() => hello().wordStamp(2, 1), throwsRangeError);
     });
 
-    test('word_stamp_one_word_line_has_nothing_to_time', () {
-      final s = hello()..wordStamp(1, 5);
-      expect(s.wordTimes[1], isNull);
+    test('word_stamp_one_word_line_takes_one_press', () {
+      final s = hello()..wordStamp(1, 5)..wordStamp(1, 6);
+      expect(s.wordTimes[1], [5.0]);
     });
 
     test('undo_word', () {
       final s = hello()..wordStamp(0, 1.4)..wordStamp(0, 1.9);
       s.undoWord(0);
-      expect(s.wordTimes[0], [1.0, 1.4, null]);
+      expect(s.wordTimes[0], [1.4, null, null]);
       s.undoWord(0);
-      expect(s.wordTimes[0], isNull, reason: 'only the line time is left: line-only again');
+      expect(s.wordTimes[0], isNull, reason: 'no word is left: line-only again');
       s.undoWord(0);
       s.undoWord(1);
       expect(s.wordTimes, [null, null]);
@@ -409,6 +410,106 @@ void main() {
       expect(() => s.wordTimes[1] = [1.0], throwsUnsupportedError);
       s.wordStamp(1, 5);
       expect(s.wordTimes[0], [1.0, 1.4, 1.9]);
+    });
+  });
+
+  group('wordMarks', () {
+    const lit = WordMark.lit, current = WordMark.current, plain = WordMark.plain;
+
+    test('timing_before_any_tap_the_first_word_is_current', () {
+      expect(wordMarks(wordCount: 3, timing: true), [current, plain, plain]);
+      expect(wordMarks(wordCount: 3, times: [null, null, null], timing: true), [current, plain, plain]);
+    });
+
+    test('timing_with_a_gap', () {
+      expect(wordMarks(wordCount: 3, times: [1.0, null, 1.9], timing: true), [lit, plain, current]);
+      expect(wordMarks(wordCount: 3, times: [null, 1.4, null], timing: true), [plain, current, plain]);
+    });
+
+    test('timing_a_one_word_line', () {
+      expect(wordMarks(wordCount: 1, timing: true), [current]);
+      expect(wordMarks(wordCount: 1, times: [1.0], timing: true), [current]);
+    });
+
+    test('timing_the_current_word_is_the_last_one_timed', () {
+      expect(wordMarks(wordCount: 3, times: [1.0, null, null], timing: true), [current, plain, plain]);
+      expect(wordMarks(wordCount: 3, times: [1.0, 1.4, null], timing: true), [lit, current, plain]);
+      expect(wordMarks(wordCount: 3, times: [1.0, 1.4, 1.9], timing: true), [lit, lit, current]);
+    });
+
+    test('playing_lights_words_whose_time_has_come', () {
+      const times = <double?>[1.0, 1.4, 1.9];
+      expect(wordMarks(wordCount: 3, times: times, position: 1.5), [lit, lit, plain]);
+      expect(wordMarks(wordCount: 3, times: times, position: 0.9), [plain, plain, plain]);
+      expect(wordMarks(wordCount: 3, times: times, position: 1.0), [lit, plain, plain]);
+      expect(wordMarks(wordCount: 3, times: times, position: 2.0), [lit, lit, lit]);
+    });
+
+    test('playing_uses_the_offset', () {
+      expect(
+        wordMarks(wordCount: 3, times: [1.0, 1.4, 1.9], position: 1.5, offset: 0.3),
+        [lit, plain, plain],
+      );
+      expect(
+        wordMarks(wordCount: 3, times: [1.0, 1.4, 1.9], position: 1.5, offset: -0.3),
+        [lit, lit, plain],
+      );
+    });
+
+    test('playing_ignores_untimed_words', () {
+      expect(
+        wordMarks(wordCount: 3, times: [1.0, null, 1.9], position: 5),
+        [lit, plain, lit],
+      );
+    });
+
+    test('playing_never_marks_a_next_word', () {
+      expect(
+        wordMarks(wordCount: 3, times: [1.0, null, null], position: 5).contains(current),
+        isFalse,
+      );
+    });
+
+    test('no_word_times_no_marks', () {
+      expect(wordMarks(wordCount: 3, position: 5), [plain, plain, plain]);
+      expect(wordMarks(wordCount: 0, timing: true), isEmpty);
+    });
+
+    test('a_time_list_longer_or_shorter_than_the_words_is_safe', () {
+      expect(wordMarks(wordCount: 2, times: [1.0, 1.4, 1.9], position: 9), [lit, lit]);
+      expect(wordMarks(wordCount: 3, times: [1.0], position: 9), [lit, plain, plain]);
+    });
+  });
+
+  group('resetWords', () {
+    TapSession twoLines() => TapSession(
+      ['la la la', 'na na'],
+      times: [1.0, 2.0],
+    )
+      ..wordStamp(0, 1.0)
+      ..wordStamp(0, 1.4)
+      ..wordStamp(0, 1.9)
+      ..wordStamp(1, 2.0)
+      ..wordStamp(1, 2.5);
+
+    test('reset_words_clears_one_line', () {
+      final s = twoLines()..resetWords(0);
+      expect(s.wordTimes, [
+        null,
+        [2.0, 2.5],
+      ]);
+      expect(s.times, [1.0, 2.0]);
+      expect(s.isComplete, isTrue);
+    });
+
+    test('reset_words_on_a_line_without_words_does_nothing', () {
+      final s = TapSession(['la la'], times: [1.0])..resetWords(0);
+      expect(s.wordTimes, [null]);
+      expect(s.times, [1.0]);
+    });
+
+    test('reset_words_bad_index_throws', () {
+      expect(() => twoLines().resetWords(5), throwsRangeError);
     });
   });
 }

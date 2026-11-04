@@ -41,6 +41,18 @@ class SongProject {
   /// of lrclib.net, untouched) or 'lrclib+tapped' (those, corrected by hand).
   String timingSource = 'tapped';
 
+  /// The .karmp3 this song was opened from, so Export can save over it; null for a song made
+  /// from an audio or video file.
+  String? karmp3Path;
+
+  /// True while the stems come from the opened .karmp3 (no source file to read, no split).
+  /// Replacing the audio makes it false.
+  bool audioFromKarmp3 = false;
+
+  /// The model that split the vocals, as the .nfo names it (without ".onnx"), when the song
+  /// was opened from a .karmp3 that an earlier version made; null means this version's model.
+  String? separator;
+
   Map<String, dynamic> toJson() => {
     'id': id,
     'inputPath': inputPath,
@@ -55,6 +67,9 @@ class SongProject {
     'offset': offset,
     'includeVocals': includeVocals,
     'timingSource': timingSource,
+    'karmp3Path': karmp3Path,
+    'audioFromKarmp3': audioFromKarmp3,
+    'separator': separator,
   };
 
   /// Reads a project. Missing optional keys get their defaults and unknown keys are
@@ -123,10 +138,13 @@ class SongProject {
     if (offset != null) p.offset = asDouble(offset, 'offset');
     p.includeVocals = read('includeVocals', false);
     final source = read('timingSource', 'tapped');
-    if (!const ['tapped', 'lrclib', 'lrclib+tapped'].contains(source)) {
+    if (!const ['tapped', 'lrclib', 'lrclib+tapped', 'ai', 'ai+tapped'].contains(source)) {
       throw FormatException('"timingSource" is not a known value', source);
     }
     p.timingSource = source;
+    p.karmp3Path = read<String?>('karmp3Path', null);
+    p.audioFromKarmp3 = read('audioFromKarmp3', false);
+    p.separator = read<String?>('separator', null);
     return p;
   }
 

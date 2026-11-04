@@ -34,7 +34,7 @@ The first time, the app asks before it downloads the tools it needs (ffmpeg, Pyt
 
 ## How it works
 
-Click **New song** and pick an audio or video file (an .mp3 or .mp4, for example). Six steps follow, one screen each.
+Click **New song** and pick an audio or video file (an .mp3 or .mp4, for example). Six steps follow, one screen each. To change a karaoke file you made before, click **Open .karmp3** instead: it opens as a song that is already split, so you can edit its details, lyrics and timing and save it again.
 
 **1. Song.** The app reads your file.
 
@@ -52,25 +52,45 @@ Click **New song** and pick an audio or video file (an .mp3 or .mp4, for example
 
 <img src="docs/screenshots/04-lyrics.png" alt="Lyrics results and the lyrics box" width="600">
 
-**5. Timing.** Play the song and press Space as each line starts.
+**5. Timing.** Play the song and press Space as each line starts. For word-by-word timing switch on **Word timing**: Space then times the next word of the selected line, first word included (one press per word); the words you have timed light up and the word being sung (the one you timed last) is underlined. After the last word the selection moves to the first word of the next line. Backspace takes back one word at a time, and **Reset the words of this line** clears the whole line so you can time it again. While the song plays, the words of the current line light up as they are sung. **Auto-time with AI** (optional, needs a free Cloudflare account: see below) listens to the vocals and times every word for you.
 
 <img src="docs/screenshots/05-timing.png" alt="Timing the lyrics line by line" width="600">
 
-**6. Export.** Choose whether to include the vocals and save the `.karmp3`.
+**6. Export.** Choose whether to include the vocals and save the `.karmp3`. Click **Preview** first to hear the song with the lyrics moving as they will in the file (with the vocals on or off, and at a level you choose, if you included them).
 
 <img src="docs/screenshots/06-export.png" alt="The export step after saving a file" width="600">
 
+## Automatic timing with Cloudflare AI (optional)
+
+The **Auto-time with AI** button in the Timing step sends the song's vocals to [Cloudflare Workers AI](https://developers.cloudflare.com/workers-ai/) (the Deepgram Nova-3 speech model), which says when each word starts. The app lines the words up with your lyrics, gives every word a time, and offers to add words that are sung but missing from your lyrics. Every time is put 200 ms earlier than heard, so singers have time to react to the next word. Check the result by playing the song; it is a good first draft, not a perfect one.
+
+To use it you need a Cloudflare account and two values from it. The Cloudflare dashboard changes now and then, so a button may be named a little differently; Cloudflare's own guide is [Workers AI: REST API](https://developers.cloudflare.com/workers-ai/get-started/rest-api/).
+
+1. **Make a free account** at [cloudflare.com](https://www.cloudflare.com/). Check Cloudflare's Workers AI pricing (linked from the guide above) for the free allowance and what happens beyond it: use of the AI is billed to your account, not by this app.
+2. **Find your Account ID.** In the dashboard open **AI > Workers AI** and choose **Use REST API**: the panel shows your Account ID. (It is also on your account's home page, in the menu next to the account name: **Copy account ID**.)
+3. **Make an API token.** In the same panel choose **Create a Workers AI API Token** (or go to **My Profile > API Tokens > Create Token** and pick the **Workers AI** template). The token needs the permissions **Workers AI: Read** and **Workers AI: Edit**. Copy the token when it is shown: Cloudflare shows it only once.
+4. **Put them in Kantahe Maker.** Click the settings icon (top right of the home screen), find **Cloudflare AI (automatic timing)**, paste the Account ID and the API token, and click **Save and test**. The app saves them and checks them with Cloudflare (a free request that does not use the AI). The message under the button says whether the test passed; if it did, the **Auto-time with AI** button appears in the Timing step, and if not it stays hidden until a test passes. Changing either value tests it again.
+5. **Use it.** Open a song's Timing step and click **Auto-time with AI**. The app asks before it sends anything, then shows how many lyric words it found and any missing words it proposes (tick the ones to add), and **Apply** replaces the times of all lines. You can correct any line or word by hand afterwards, as usual.
+
+Good to know:
+
+- Only the vocals are sent (the whole song if the song has no separate vocals), and only after you click **Send and time**, each time.
+- The token is kept in the app's settings file on your computer, readable only by your user account on macOS and Linux. Treat it like a password: do not share it, and do not put it in a bug report. To stop using the feature, clear both fields and click **Save and test**, and delete the token in the Cloudflare dashboard.
+- If the test says Cloudflare refused the request, the Account ID is wrong or the token lacks the Workers AI permissions (Read and Edit). Fix it and click **Save and test** again.
+- The result is only as good as the AI's hearing: songs with loud backing vocals, rap, or a language it knows poorly give weaker times.
+
 ## Your privacy
 
-Your songs stay on your computer. The app sends only a few words, only to these services, and each step shows what it sends:
+Your songs stay on your computer, unless you use the optional AI timing below. The app otherwise sends only a few words, only to these services, and each step shows what it sends:
 
 - **Details:** the title and artist (or the file name) go to musicbrainz.org.
 - **Lyrics:** the title and artist go to lrclib.net, and to lyrics.ovh when lrclib.net finds nothing. If lrclib.net has a server problem, the app tries again up to 5 times; then a link offers a Google search for the lyrics in your browser. The title and artist go to Google only when you click that link.
 - **Spotify link (optional):** the link you paste goes to open.spotify.com, to read the title, artist and length; those then go to musicbrainz.org and lrclib.net as above.
 - **New song from a Spotify link (robot icon):** the same, and spotsaver.net is opened in a Chrome or Edge window that opens minimized for a few seconds with your link, as if you used the site yourself; it sends back the MP3.
 - **Tools:** with your consent, about 1.4 GB once (see Download).
+- **Auto-time with AI (optional):** if you set it up and click it, the song's vocals go to Cloudflare Workers AI (api.cloudflare.com), after you confirm each time. Nothing is sent unless you do.
 
-Nothing else leaves your computer. There is no account.
+Nothing else leaves your computer. There is no account (Cloudflare is needed only for the optional AI timing).
 
 ## FAQ
 
@@ -81,6 +101,8 @@ Nothing else leaves your computer. There is no account.
 **Where does the audio of a Spotify link come from?** The robot icon next to "New song" asks for a Spotify song link and does the rest: spotsaver.net converts a YouTube video of the song to MP3 in a Chrome or Edge window that opens minimized for a few seconds, the details and lyrics come from the link, and the song opens ready for vocal splitting. It is not Spotify's audio, so quality and version can differ. It needs Google Chrome or Microsoft Edge installed. Use it only for songs you have the right to use.
 
 **The download from a Spotify link failed. What now?** Choose your own MP3 in the same window ("Choose an MP3 instead"): the details and lyrics from the link are kept. Or try again.
+
+**Can I edit a .karmp3 I made before?** Yes: click **Open .karmp3** on the home screen. The song opens with its details, lyrics and times as they are in the file, and the audio in the file is used as it is, so nothing is split again. Change what you like, then go to Export: **Save over** replaces the file you opened (after asking you), and **Export as...** saves a copy somewhere else. The file you opened is not touched until you save over it. To use another recording, click **Replace the audio...** on the Song step: the new file is read and split like a new song, and your details, lyrics and times stay (re-tap in Timing if the new audio starts or ends differently). Files made by older versions open too.
 
 **Where are my songs saved?** In the app's folder for your user (on macOS: `~/Library/Application Support/party.kantahe.maker/projects`), saved as you go. The `.karmp3` goes where you choose. Delete a song from the list on the home screen.
 
@@ -137,6 +159,7 @@ and off.
 | 1.1 and later | The same, and the `.nfo` always has an `Instrumental` row. `NAME.vocals.mp3` is added when the user chose to include the vocals. The instrumental is 128 kbps for songs processed by 1.1 (192 kbps for songs processed earlier); both MP3s are normalized to about -16 LUFS |
 | 1.2.0 only | The same, but both MP3s are variable bitrate (the instrumental averages about 96 kbps, the vocals about 48 kbps) with a Xing header. The `Audio` and `Vocals audio` rows say "average (VBR)". Players that use a browser's audio element play the vocals late after a seek (see "Constant bitrate") |
 | 1.2.1 and later | The same, with constant-bitrate MP3s: the instrumental 96 kbps and the vocals 48 kbps, both with an Info header (frame count and seek table). The `Audio` and `Vocals audio` rows say the plain bitrate |
+| 1.2.6 and later | The same, and the `.nfo` always has a `Timing by` row (`line` or `word`). Songs timed with the AI have the two new `Lyric timing` values below |
 
 ### Files in the archive
 
@@ -223,13 +246,16 @@ order or on a row being there unless the table says "always"):
 | `Vocals` | only when the vocals are included | the name of the vocals' entry (`NAME.vocals.mp3`) |
 | `Vocals audio` | only when the vocals are included and could be read | what the vocals really are, in the same words as `Audio` and then the channels: `MP3, 44.1 kHz, 48 kbps, mono` (`64 kbps` in files made by 1.1, `46 kbps average (VBR)` and the like in files made by 1.2.0) |
 | `Lyrics` | always | `timed (.lrc, N lines)` |
-| `Lyric timing` | always | where the times come from: `tapped by hand in Kantahe Maker`, or `from lrclib.net synced lyrics` (times that came with the lyrics and were not changed), or `from lrclib.net synced lyrics, corrected by hand in Kantahe Maker` |
+| `Lyric timing` | always | where the times come from: `tapped by hand in Kantahe Maker`, or `from lrclib.net synced lyrics` (times that came with the lyrics and were not changed), or `from lrclib.net synced lyrics, corrected by hand in Kantahe Maker`, or (1.2.6 and later) `automatic: words timed by Deepgram Nova-3 on Cloudflare Workers AI` (with `, corrected by hand in Kantahe Maker` added when the user changed the times afterwards). A reader should show any value it does not know as it is, not treat it as an error |
+| `Timing by` | always in files made by 1.2.6 and later | `word` when at least one lyric line in the `.lrc` has word marks, otherwise `line`; a player can use it to flag the song without reading the `.lrc`. A file without this row is timed by line, unless its `.lrc` has word marks |
 
 ### Reading a .karmp3
 
 1. Open the file as a ZIP archive.
 2. Find the `.lrc` and the `.nfo` entries by their extension.
 3. Parse the `.nfo` into key/value pairs with `^(.+?)\s+:\s(.*)$`.
+   `Timing by` says `word` when the `.lrc` has word marks (show a flag for the song); a file
+   without the row is timed by line.
 4. The **instrumental** is the entry whose name is the value of `Instrumental`. If there is
    no such row (a file made by 1.0.x), it is the only `.mp3` entry.
 5. The **vocals** are the entry whose name is the value of `Vocals`. If there is no such row
@@ -286,6 +312,7 @@ Vocals         : 00101 - Traditional - Amazing Grace.vocals.mp3
 Vocals audio   : MP3, 44.1 kHz, 48 kbps, mono
 Lyrics         : timed (.lrc, 4 lines)
 Lyric timing   : tapped by hand in Kantahe Maker
+Timing by      : word
 ```
 
 `00101 - Traditional - Amazing Grace.lrc` (the third line has word timing):

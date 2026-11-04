@@ -7,19 +7,26 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 
+import '../ai_timing.dart';
+import '../app_dirs.dart';
 import '../autofill.dart';
 import '../export.dart';
+import '../fs_retry.dart';
 import '../jobs.dart';
-import '../karmp3.dart' show karMp3Name;
+import '../karmp3.dart' show LrcLine, karMp3Name;
 import '../lyrics_lookup.dart';
 import '../mp3_info.dart';
 import '../pipeline.dart';
+import '../preview.dart';
 import '../project.dart';
+import '../settings.dart';
 import '../song_info.dart';
 import '../spotify_link.dart';
 import '../tools.dart';
 import '../windows_dialogs.dart';
 import '../wizard.dart';
+import 'pick_files.dart';
+import 'preview_dialog.dart';
 import 'tap_screen.dart';
 import 'lyrics_search_panel.dart';
 import 'song_info_panel.dart';
@@ -59,6 +66,8 @@ class SongScreen extends StatefulWidget {
     this.importFn,
     this.separateFn,
     this.durationFn,
+    this.sourceFromStemsFn,
+    this.pickAudio,
     this.saveLocation,
     this.revealFile,
     this.createPlayer,
@@ -68,6 +77,8 @@ class SongScreen extends StatefulWidget {
     this.tagsFn,
     this.spotifyFinder,
     this.autofill,
+    this.loadSettingsFn,
+    this.aiTranscribeFn,
     this.saveDelay = const Duration(milliseconds: 500),
   });
 
@@ -88,6 +99,19 @@ class SongScreen extends StatefulWidget {
   )?
   separateFn;
   final Future<double> Function(ToolPaths tools, String file)? durationFn;
+
+  /// Makes source.mp3 of a song opened from a .karmp3 by mixing its stems; null means
+  /// [makeSourceFromStems].
+  final Future<void> Function(
+    ToolPaths tools,
+    Directory work,
+    void Function(String line) onLine,
+  )?
+  sourceFromStemsFn;
+
+  /// Asks the user for another audio or video file for an opened song; null if they cancel.
+  /// Null means the real file dialog.
+  final Future<String?> Function()? pickAudio;
 
   /// Asks where to save the file; null if the user cancels.
   final Future<String?> Function(String suggestedName)? saveLocation;
@@ -124,6 +148,12 @@ class SongScreen extends StatefulWidget {
   )?
   autofill;
 
+  /// Reads the settings (the Cloudflare keys); null means the settings file.
+  final Future<AppSettings> Function()? loadSettingsFn;
+
+  /// Sends the audio to the AI and returns the heard words; null means Cloudflare Nova-3.
+  final Future<List<HeardWord>> Function(Uint8List audio, AppSettings settings)? aiTranscribeFn;
+
   /// How long typing pauses before it is saved.
   final Duration saveDelay;
 
@@ -138,6 +168,13 @@ class _SongScreenState extends State<SongScreen> {
   Timer? _saveTimer;
   bool _savePending = false;
   List<String> _tapLines = const [];
+
+  /// Bumped when the AI replaces the timing, so the tap screen starts again from it.
+  int _tapGeneration = 0;
+  bool _aiBusy = false;
+
+  /// Cloudflare is set up and was tested working (Settings), so the AI button is shown.
+  bool _aiReady = false;
 
   _Stage _stage = _Stage.checking;
   String _error = '';
@@ -156,6 +193,9 @@ class _SongScreenState extends State<SongScreen> {
 
   /// Where the last export of this visit was written, for "Show in folder".
   String? _exportedPath;
+
+  /// "Exported" or "Saved", for the line under the Export buttons.
+  String _exportedVerb = 'Exported';
   WizardStep _step = WizardStep.song;
 
   /// The title and artist of the last automatic lyrics search, so coming back to the
@@ -210,9 +250,11 @@ class _SongScreenState extends State<SongScreen> {
       return;
     }
     if (!mounted) return;
+    // A song opened from a .karmp3 has no source file to split from, so source.mp3 (the song
+    // for the Timing step) is all it needs; a normal song needs source.wav too.
     _hasSource =
         File(_file('source.mp3')).existsSync() &&
-        File(_file('source.wav')).existsSync();
+        (project.audioFromKarmp3 || File(_file('source.wav')).existsSync());
     _hasInstrumental = File(_file('instrumental.mp3')).existsSync();
     _hasVocals = File(_file('vocals.mp3')).existsSync();
     for (final entry in {
@@ -230,6 +272,7 @@ class _SongScreenState extends State<SongScreen> {
       _tapLines = project.lyricLines();
       _step = openingStep(_facts);
     });
+    unawaited(_refreshAiReady());
     unawaited(_runAudio());
   }
 
@@ -264,6 +307,37 @@ class _SongScreenState extends State<SongScreen> {
     }
     _tools = tools;
     if (_hasSource) _measureAudio(tools);
+
+    if (_project!.audioFromKarmp3) {
+      // The stems are the ones in the .karmp3: nothing is read from a source file and
+      // nothing is split. Only source.mp3 may be missing (a file with vocals has no
+      // original audio), and that is mixed from the two stems.
+      if (!_hasInstrumental) {
+        _setStage(
+          _Stage.importFailed,
+          error: 'The audio of this song is missing',
+        );
+        return;
+      }
+      if (!_hasSource) {
+        _setStage(_Stage.importing);
+        try {
+          await (widget.sourceFromStemsFn ?? _defaultSourceFromStems)(
+            tools,
+            widget.dir,
+            _onLine,
+          );
+        } catch (e) {
+          _setStage(_Stage.importFailed, error: '$e');
+          return;
+        }
+        if (!mounted) return;
+        setState(() => _hasSource = true);
+        _measureAudio(tools);
+      }
+      _setStage(_Stage.ready);
+      return;
+    }
 
     if (!_hasSource) {
       _setStage(_Stage.importing);
@@ -319,6 +393,67 @@ class _SongScreenState extends State<SongScreen> {
     } finally {
       if (identical(_job, job)) _job = null;
     }
+  }
+
+  /// "Replace the audio...": asks for another audio or video file, tells the user what will
+  /// happen, and then reads and splits it as for a new song. The details, lyrics and times
+  /// stay; the stems that came with the .karmp3 are deleted.
+  Future<void> _pickReplacement() async {
+    final String? path;
+    try {
+      path = await (widget.pickAudio ?? pickAudioFile)();
+    } catch (e) {
+      _showMessage('Could not open the file dialog: $e');
+      return;
+    }
+    if (path == null || !mounted) return;
+    final go = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Replace the audio?'),
+        content: Text(
+          'The song is read from ${p.basename(path!)} and split again (this takes a few '
+          'minutes). The details, lyrics and times stay; if the new audio starts or ends '
+          'differently, re-tap in Timing.',
+        ),
+        actions: [
+          TextButton(
+            key: const ValueKey('replace-audio-cancel'),
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            key: const ValueKey('replace-audio-go'),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Replace'),
+          ),
+        ],
+      ),
+    );
+    if (go != true || !mounted) return;
+    final project = _project!;
+    project.inputPath = path;
+    project.audioFromKarmp3 = false;
+    project.separator = null;
+    try {
+      await project.save(widget.dir);
+    } catch (e) {
+      _showMessage('Could not save: $e');
+      return;
+    }
+    for (final name in ['source.mp3', 'source.wav', 'instrumental.mp3', 'vocals.mp3']) {
+      deleteQuietly(File(_file(name)));
+    }
+    if (!mounted) return;
+    setState(() {
+      _hasSource = false;
+      _hasInstrumental = false;
+      _hasVocals = false;
+      _audioLength = null;
+      _exportedPath = null;
+      _step = WizardStep.song;
+    });
+    unawaited(_runAudio());
   }
 
   /// Starts measuring the audio (once); the lyrics results are ranked by it. A failure
@@ -381,6 +516,12 @@ class _SongScreenState extends State<SongScreen> {
     void Function(String) onLine,
   ) => importSong(t, input, work, onLine: onLine);
 
+  static Future<void> _defaultSourceFromStems(
+    ToolPaths t,
+    Directory work,
+    void Function(String) onLine,
+  ) => makeSourceFromStems(t, work, onLine: onLine);
+
   static CancellableJob _defaultSeparate(
     ToolPaths t,
     Directory work,
@@ -436,6 +577,8 @@ class _SongScreenState extends State<SongScreen> {
     // before it can be tapped.
     if (_savePending) _saveNow();
     setState(() => _step = step);
+    // Settings may have changed since the song was opened.
+    if (step == WizardStep.timing) unawaited(_refreshAiReady());
   }
 
   // ------------------------------------------------------------------- export
@@ -479,43 +622,115 @@ class _SongScreenState extends State<SongScreen> {
       if (chosen == null || chosen.trim().isEmpty) return;
       final dest = exportDestination(chosen, _fileName(project));
       if (!mounted) return;
-      // The song length comes from ffprobe, which may not be known yet when a finished
-      // song was opened.
-      final tools =
-          _tools ?? await (widget.ensureToolsFn ?? ensureTools)(context);
-      if (!mounted) return;
-      if (tools == null) {
-        _showMessage('Tools are needed to read the song length.');
-        return;
-      }
-      _tools = tools;
-      final instrumental = _file('instrumental.mp3');
-      final seconds = await (widget.durationFn ?? durationSeconds)(
-        tools,
-        instrumental,
-      );
-      await exportKarMp3(project, widget.dir, dest, durationSeconds: seconds);
-      if (!mounted) return;
-      setState(() => _exportedPath = dest);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Exported ${p.basename(dest)}'),
-          // A snackbar with an action stays until dismissed unless persist is off.
-          persist: false,
-          duration: const Duration(seconds: 3),
-          showCloseIcon: true,
-          action: SnackBarAction(
-            label: 'Show',
-            onPressed: () =>
-                unawaited((widget.revealFile ?? _defaultReveal)(dest)),
-          ),
-        ),
-      );
+      await _writeTo(dest, 'Exported');
     } catch (e) {
       _showMessage('Export failed: $e');
     } finally {
       if (mounted) setState(() => _exporting = false);
     }
+  }
+
+  /// "Preview": plays the song as the export would make it (the song folder's own MP3s) with
+  /// the lyrics moving at the times the export writes. Nothing is written.
+  Future<void> _showPreview() async {
+    final project = _project!;
+    final List<LrcLine> lines;
+    try {
+      lines = previewLines(project);
+    } on StateError catch (e) {
+      _showMessage('Preview is not possible yet: ${e.message}');
+      return;
+    }
+    await showDialog<void>(
+      context: context,
+      builder: (_) => PreviewDialog(
+        title: '${oneLine(project.title)} - ${oneLine(project.artist)}',
+        lines: lines,
+        instrumentalPath: _file('instrumental.mp3'),
+        vocalsPath: project.includeVocals ? _file('vocals.mp3') : null,
+        createPlayer: widget.createPlayer,
+      ),
+    );
+  }
+
+  /// "Save over" the file, for a song opened from a .karmp3: after the user confirms, writes the
+  /// edited song to the same path, without a Save dialog. The file is replaced only when the
+  /// new one is complete (writeKarMp3 writes ".part" and renames), so a failure leaves the old
+  /// file as it was; the opened file's audio was copied into the song folder when it was
+  /// opened, so nothing reads it meanwhile.
+  Future<void> _saveOver() async {
+    final path = _project!.karmp3Path!;
+    final name = p.basename(path);
+    final go = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Replace $name?'),
+        content: const Text(
+          'The file is replaced by the edited song. This cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            key: const ValueKey('save-over-cancel'),
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            key: const ValueKey('save-over-go'),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Replace'),
+          ),
+        ],
+      ),
+    );
+    if (go != true || !mounted) return;
+    if (!Directory(p.dirname(path)).existsSync()) {
+      _showMessage('The folder of $name is gone; use Export as...');
+      return;
+    }
+    setState(() => _exporting = true);
+    try {
+      await _writeTo(path, 'Saved');
+    } catch (e) {
+      _showMessage('Save failed: $e');
+    } finally {
+      if (mounted) setState(() => _exporting = false);
+    }
+  }
+
+  /// Writes the .karmp3 of the song to [dest] and says so ([verb] is "Exported" or "Saved").
+  /// Throws what exportKarMp3 throws; the caller shows it.
+  Future<void> _writeTo(String dest, String verb) async {
+    final project = _project!;
+    // The song length comes from ffprobe, which may not be known yet when a finished
+    // song was opened.
+    final tools = _tools ?? await (widget.ensureToolsFn ?? ensureTools)(context);
+    if (!mounted) return;
+    if (tools == null) {
+      _showMessage('Tools are needed to read the song length.');
+      return;
+    }
+    _tools = tools;
+    final instrumental = _file('instrumental.mp3');
+    final seconds = await (widget.durationFn ?? durationSeconds)(tools, instrumental);
+    await exportKarMp3(project, widget.dir, dest, durationSeconds: seconds);
+    if (!mounted) return;
+    setState(() {
+      _exportedPath = dest;
+      _exportedVerb = verb;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('$verb ${p.basename(dest)}'),
+        // A snackbar with an action stays until dismissed unless persist is off.
+        persist: false,
+        duration: const Duration(seconds: 3),
+        showCloseIcon: true,
+        action: SnackBarAction(
+          label: 'Show',
+          onPressed: () => unawaited((widget.revealFile ?? _defaultReveal)(dest)),
+        ),
+      ),
+    );
   }
 
   // --------------------------------------------------------------------- view
@@ -554,12 +769,16 @@ class _SongScreenState extends State<SongScreen> {
           ],
         );
       case _Stage.importing:
-        return const Column(
+        return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Reading the song...'),
-            SizedBox(height: 8),
-            LinearProgressIndicator(),
+            Text(
+              _project?.audioFromKarmp3 == true
+                  ? 'Preparing the song for timing...'
+                  : 'Reading the song...',
+            ),
+            const SizedBox(height: 8),
+            const LinearProgressIndicator(),
           ],
         );
       case _Stage.separating:
@@ -592,7 +811,12 @@ class _SongScreenState extends State<SongScreen> {
           ],
         );
       case _Stage.importFailed:
-        return _problem('Could not read the song: $_error', 'Retry');
+        return _problem(
+          _project?.audioFromKarmp3 == true
+              ? 'Could not prepare the song for timing: $_error'
+              : 'Could not read the song: $_error',
+          'Retry',
+        );
       case _Stage.separationFailed:
         return _problem('Vocal splitting failed: $_error', 'Retry');
       case _Stage.cancelled:
@@ -912,26 +1136,212 @@ class _SongScreenState extends State<SongScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          blockers.isEmpty
-              ? 'All ${project.lyricLines().length} lines tapped'
-              : blockers.first,
-          key: const ValueKey('timing-status'),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    blockers.isEmpty
+                        ? 'All ${project.lyricLines().length} lines tapped'
+                        : blockers.first,
+                    key: const ValueKey('timing-status'),
+                  ),
+                  if (project.timingSource.startsWith('lrclib'))
+                    const Text(
+                      'These times came with the lyrics from lrclib.net. Play the song and tap again where a line is off.',
+                      key: ValueKey('timing-from-lrclib'),
+                    ),
+                ],
+              ),
+            ),
+            if (_aiReady) ...[
+              const SizedBox(width: 12),
+              OutlinedButton.icon(
+                key: const ValueKey('ai-time'),
+                onPressed: _aiBusy ? null : () => unawaited(_autoTime()),
+                icon: const Icon(Icons.auto_awesome),
+                label: const Text('Auto-time with AI'),
+              ),
+            ],
+          ],
         ),
-        if (project.timingSource.startsWith('lrclib'))
-          const Text(
-            'These times came with the lyrics from lrclib.net. Play the song and tap again where a line is off.',
-            key: ValueKey('timing-from-lrclib'),
-          ),
+        if (_aiBusy) const LinearProgressIndicator(key: ValueKey('ai-busy')),
         const SizedBox(height: 8),
         Expanded(child: _tapScreen(project)),
       ],
     );
   }
 
+  static Future<AppSettings> _defaultLoadSettings() async =>
+      readSettings(await appSettingsFile());
+
+  static Future<List<HeardWord>> _defaultTranscribe(Uint8List audio, AppSettings settings) =>
+      transcribeWords(
+        audio,
+        accountId: settings.cloudflareAccountId,
+        token: settings.cloudflareToken,
+      );
+
+  /// Reads the settings to see whether the AI button may be shown. A missing or unreadable
+  /// settings file means no.
+  Future<void> _refreshAiReady() async {
+    bool ready;
+    try {
+      ready = (await (widget.loadSettingsFn ?? _defaultLoadSettings)()).cloudflareReady;
+    } catch (_) {
+      ready = false;
+    }
+    if (mounted && ready != _aiReady) setState(() => _aiReady = ready);
+  }
+
+  /// "Auto-time with AI": sends the vocals (after the user agrees) to Cloudflare, shows what
+  /// was heard and, if the user agrees again, replaces the timing of all lines.
+  Future<void> _autoTime() async {
+    final project = _project;
+    if (project == null || _aiBusy) return;
+    AppSettings settings;
+    try {
+      settings = await (widget.loadSettingsFn ?? _defaultLoadSettings)();
+    } catch (_) {
+      settings = const AppSettings();
+    }
+    if (!mounted) return;
+    if (!settings.cloudflareReady) {
+      setState(() => _aiReady = false);
+      _showMessage('Cloudflare AI is not set up: save and test it in Settings first.');
+      return;
+    }
+    final vocals = _hasVocals;
+    final agreed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        key: const ValueKey('ai-consent'),
+        title: const Text('Send the audio to Cloudflare?'),
+        content: Text(
+          vocals
+              ? 'The vocals of this song will be sent to Cloudflare Workers AI (Deepgram Nova-3), '
+                  'which listens to them and says when each word starts.'
+              : 'This song has no separate vocals, so the whole song will be sent to Cloudflare '
+                  'Workers AI (Deepgram Nova-3). It works best with the vocals alone.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
+          FilledButton(
+            key: const ValueKey('ai-send'),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Send and time'),
+          ),
+        ],
+      ),
+    );
+    if (agreed != true || !mounted) return;
+    final lines = project.lyricLines();
+    setState(() => _aiBusy = true);
+    try {
+      final bytes = await File(_file(vocals ? 'vocals.mp3' : 'source.mp3')).readAsBytes();
+      final heard = await (widget.aiTranscribeFn ?? _defaultTranscribe)(bytes, settings);
+      final first = alignLyrics(lines, heard);
+      final missing = findMissingWords(lines, heard);
+      if (!mounted) return;
+      setState(() => _aiBusy = false);
+      final chosen = await _reviewAi(first, missing);
+      if (chosen == null || !mounted) return;
+      if (!listEquals(lines, project.lyricLines())) {
+        _showMessage('The lyrics changed meanwhile; nothing was applied.');
+        return;
+      }
+      final newLines = withMissingWords(lines, chosen);
+      final result = alignLyrics(newLines, heard);
+      project.setLyrics(newLines.join('\n'));
+      project.times = List.of(result.times);
+      project.wordTimes = [for (final w in result.wordTimes) w == null ? null : List.of(w)];
+      project.timingSource = 'ai';
+      setState(() => _tapGeneration++);
+      _saveNow();
+      _showMessage('Timed ${result.matched} of ${result.total} words');
+    } on AiTimingException catch (e) {
+      _showMessage(e.message);
+    } catch (e) {
+      _showMessage('Automatic timing failed: $e');
+    } finally {
+      if (mounted) setState(() => _aiBusy = false);
+    }
+  }
+
+  /// What the AI found, with the missing words it proposes (all ticked). The ticked ones, or
+  /// null if the user cancels.
+  Future<List<MissingWords>?> _reviewAi(AiTiming found, List<MissingWords> missing) {
+    final ticked = List.filled(missing.length, true);
+    return showDialog<List<MissingWords>>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setLocal) => AlertDialog(
+          key: const ValueKey('ai-review'),
+          title: const Text('Apply the AI timing?'),
+          content: SizedBox(
+            width: 480,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Found ${found.matched} of ${found.total} lyric words in the vocals. '
+                      'The times of all lines are replaced, and put '
+                      '${(aiLeadSeconds * 1000).round()} ms earlier than sung so singers have '
+                      'time to react.'),
+                  if (found.unheardLines.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    Text(
+                      'No word of ${found.unheardLines.length == 1 ? 'line' : 'lines'} '
+                      '${found.unheardLines.map((l) => l + 1).join(', ')} was heard in the '
+                      'vocals; the times of ${found.unheardLines.length == 1 ? 'that line are' : 'those lines are'} '
+                      'only guesses.',
+                    ),
+                  ],
+                  if (missing.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    const Text('The vocals have words the lyrics do not. Add them?'),
+                    for (var i = 0; i < missing.length; i++)
+                      CheckboxListTile(
+                        key: ValueKey('ai-add-$i'),
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        value: ticked[i],
+                        onChanged: (v) => setLocal(() => ticked[i] = v ?? false),
+                        title: Text(missing[i].text),
+                        subtitle: Text(
+                          missing[i].wordIndex == 0
+                              ? 'as a new line, at ${stampLabel(missing[i].start)}'
+                              : 'inside line ${missing[i].line + 1}, at ${stampLabel(missing[i].start)}',
+                        ),
+                      ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
+            FilledButton(
+              key: const ValueKey('ai-apply'),
+              onPressed: () => Navigator.of(context).pop([
+                for (var i = 0; i < missing.length; i++)
+                  if (ticked[i]) missing[i],
+              ]),
+              child: const Text('Apply'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _tapScreen(SongProject project) {
     return TapScreen(
-      key: ValueKey(_tapLines.join('\n')),
+      key: ValueKey('${_tapLines.join('\n')}#$_tapGeneration'),
       lines: _tapLines,
       sourcePath: _file('source.mp3'),
       instrumentalPath: _hasInstrumental ? _file('instrumental.mp3') : null,
@@ -941,7 +1351,10 @@ class _SongScreenState extends State<SongScreen> {
       createPlayer: widget.createPlayer,
       onWordTimesChanged: (wordTimes) {
         if (!listEquals(_tapLines, project.lyricLines())) return;
-        setState(() => project.wordTimes = wordTimes);
+        setState(() {
+          project.wordTimes = wordTimes;
+          if (project.timingSource == 'ai') project.timingSource = 'ai+tapped';
+        });
         _saveNow();
       },
       onChanged: (times, offset) {
@@ -953,6 +1366,8 @@ class _SongScreenState extends State<SongScreen> {
           project.offset = offset;
           if (project.timingSource == 'lrclib') {
             project.timingSource = 'lrclib+tapped';
+          } else if (project.timingSource == 'ai') {
+            project.timingSource = 'ai+tapped';
           }
         });
         _saveNow();
@@ -1029,14 +1444,34 @@ class _SongScreenState extends State<SongScreen> {
           ),
         ],
         const SizedBox(height: 8),
-        FilledButton(
-          onPressed: ready && !_exporting ? _export : null,
-          child: const Text('Export .karmp3'),
+        OutlinedButton.icon(
+          key: const ValueKey('export-preview'),
+          onPressed: ready && !_exporting ? _showPreview : null,
+          icon: const Icon(Icons.play_circle_outline),
+          label: const Text('Preview'),
         ),
+        const SizedBox(height: 8),
+        if (project.karmp3Path != null) ...[
+          FilledButton(
+            key: const ValueKey('export-save-over'),
+            onPressed: ready && !_exporting ? _saveOver : null,
+            child: Text('Save over ${p.basename(project.karmp3Path!)}'),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton(
+            key: const ValueKey('export-as'),
+            onPressed: ready && !_exporting ? _export : null,
+            child: const Text('Export as...'),
+          ),
+        ] else
+          FilledButton(
+            onPressed: ready && !_exporting ? _export : null,
+            child: const Text('Export .karmp3'),
+          ),
         if (exported != null) ...[
           const SizedBox(height: 16),
           Text(
-            'Exported ${p.basename(exported)}',
+            '$_exportedVerb ${p.basename(exported)}',
             key: const ValueKey('export-done'),
           ),
           const SizedBox(height: 8),
@@ -1139,8 +1574,27 @@ class _SongScreenState extends State<SongScreen> {
     switch (_step) {
       case WizardStep.song:
         return scroll([
-          Text('File: ${p.basename(project.inputPath)}'),
+          if (project.audioFromKarmp3) ...[
+            Text('Opened from ${p.basename(project.karmp3Path ?? project.inputPath)}'),
+            const SizedBox(height: 4),
+            Text(
+              'The audio is the one in the file; your changes are saved with Export.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ] else
+            Text('File: ${p.basename(project.inputPath)}'),
           const SizedBox(height: 12),
+          if (project.audioFromKarmp3) ...[
+            OutlinedButton(
+              key: const ValueKey('replace-audio'),
+              // Not while something is being read or mixed.
+              onPressed: _stage == _Stage.checking || _stage == _Stage.importing
+                  ? null
+                  : _pickReplacement,
+              child: const Text('Replace the audio...'),
+            ),
+            const SizedBox(height: 12),
+          ],
           if (_hasSource)
             const Row(
               children: [

@@ -23,6 +23,21 @@ Back, and Next. Next and the header only open a step once every step before it i
 Split vocals does not hold up the later steps while it runs. A reopened song opens on its
 first unfinished step.
 
+**Open .karmp3** on Home makes a song from a karaoke file to edit it. lib/karmp3_read.dart reads
+the ZIP, the `.lrc` and the `.nfo`; lib/karmp3_open.dart copies the instrumental (and the vocals)
+out as they are, so nothing is split again, and fills the project from the file: details from the
+`.nfo`, lyrics and line and word times from the `.lrc` (offset 0, because those times already
+include the offset), the model name of the `Vocals removed` row, and the path of the file. The
+song screen treats such a song as already split: it needs `source.mp3` for the Timing step and
+nothing else (a file with vocals gets one by mixing the two stems with ffmpeg when it opens; one
+without vocals gets a copy of the instrumental). Opened and exported again without edits, the
+file comes out the same. "Replace the audio..." on the Song step of such a song asks for another audio or video
+file, deletes the stems and source from the song folder, clears audioFromKarmp3 and the model name
+and runs the normal read and split; the details, lyrics, times and the path of the opened file stay.
+On the Export step such a song gets **Save over <file>** (after a confirmation it writes the edited
+song to the same path through the usual `.part` file and rename, so a failure leaves the old file as
+it was) and **Export as...** (the Save dialog, for a copy elsewhere).
+
 A **robot icon** next to **New song** starts a song from a Spotify link instead: a dialog asks for
 the link (prefilled from the clipboard when it holds one) and shows a notice that the audio is
 converted by spotsaver.net. lib/spotify_link.dart reads the title, artist and length;
@@ -68,13 +83,31 @@ lyrics.
    corrects for reaction time. A preview mode plays the instrumental with the current line
    highlighted. A status line says how many lines are tapped. Times that came with the
    lyrics from lrclib.net are marked as such until the user corrects them by tapping, and the
-   `.nfo` says where the timing came from.
+   `.nfo` says where the timing came from. With **Word timing** on, Space times the next word of
+   the selected line, the first word too (one press per word, so the next line starts at its
+   first word); the rows show it (`wordMarks` in lib/tap_session.dart, colour only so a
+   line never reflows): the timed words are lit and, on the selected line, the word being sung (the last
+   timed, the first word before any is) is underlined. Outside word timing the words of the line being sung light up as they play, by
+   their times plus the offset. Backspace takes back one word at a time (after a line gets its
+   last word the selection moves on by itself, and the first Backspace goes back to that line;
+   after a click it acts on the clicked line); "Reset the words of this line" (`resetWords`)
+   clears all the word times of the selected line, keeps its tap and seeks to its start.
 6. **Export**: shows the file name and any unfinished step with a button to go there. The
    "Include the vocals" box (off by default, saved per song) adds `NAME.vocals.mp3`, so a
    player can turn the vocals on and off. A song whose vocals were removed by version 1.0.x
    has no `vocals.mp3`; with the box ticked, the step says so and offers "Run vocal splitting
-   again" first. Then a save dialog, and the `.karmp3` is written. Afterwards: Show in
-   folder, or Back to songs.
+   again" first. **Preview** (enabled when the export is ready) opens a dialog that plays the
+   song as the export would make it: lib/screens/preview_dialog.dart plays the song folder's own
+   `instrumental.mp3` (and `vocals.mp3` when the box is ticked) with the player of the Timing step,
+   and shows the lines the export writes (lib/preview.dart: `TapSession.exportLines()`, offset and
+   word times included), the line being sung highlighted, a word at a time where every word is
+   timed; a tap on a line or on the bar seeks both players. With vocals there is a switch and a
+   level; the two players start, seek and pause together and the vocals are moved to the
+   instrumental's position when more than 150 ms away (checked every 500 ms, at most once a
+   second), the rule of the Kantahe web player. The Kantahe Flutter app is not copied: it shows the
+   web player in a WebView, which needs a Kantahe server and has no desktop support. The preview
+   writes nothing and needs no ffmpeg. Then a save dialog, and the `.karmp3` is written.
+   Afterwards: Show in folder, or Back to songs.
 
 Each song's work lives in a project folder that is saved as you go, so closing the app does
 not lose the tapping.

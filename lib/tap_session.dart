@@ -16,6 +16,49 @@ List<String> splitWords(String line) {
   ];
 }
 
+/// How a word of a lyric line is shown while timing and while playing.
+enum WordMark {
+  /// Not reached or not timed.
+  plain,
+
+  /// Timed (in word timing) or already sung (while playing).
+  lit,
+
+  /// In word timing: the word being sung, the last one timed (the first word before any is).
+  current,
+}
+
+/// The marks of the [wordCount] words of one line. [times] are the line's word times (null
+/// when it has none). [timing] is word timing on this line: a timed word is lit and the last
+/// timed one is [WordMark.current], the word being sung (the first word while none is timed).
+/// Otherwise a word is lit when its time (plus [offset]) has come at [position]; there is
+/// never a current word then.
+List<WordMark> wordMarks({
+  required int wordCount,
+  List<double?>? times,
+  bool timing = false,
+  double? position,
+  double offset = 0,
+}) {
+  final marks = List.filled(wordCount, WordMark.plain);
+  if (timing) {
+    var last = -1;
+    for (var k = 0; k < wordCount; k++) {
+      if (times != null && k < times.length && times[k] != null) {
+        marks[k] = WordMark.lit;
+        last = k;
+      }
+    }
+    if (wordCount > 0) marks[last < 0 ? 0 : last] = WordMark.current;
+  } else if (position != null && times != null) {
+    for (var k = 0; k < wordCount && k < times.length; k++) {
+      final t = times[k];
+      if (t != null && t + offset <= position) marks[k] = WordMark.lit;
+    }
+  }
+  return marks;
+}
+
 class TapSession {
   TapSession(
     List<String> lines, {
@@ -58,32 +101,35 @@ class TapSession {
     for (final w in _words) w == null ? null : List<double?>.unmodifiable(w),
   ]);
 
-  /// Gives the next untimed word of [line] the time [t]. The first word always has the
-  /// line's own time, so the first call times the second word. Does nothing when every
-  /// word is timed. Throws StateError if [line] is not tapped.
+  /// Gives the next untimed word of [line] the time [t]; the first call times the first word.
+  /// Does nothing when every word is timed. Throws StateError if [line] is not tapped.
   void wordStamp(int line, double t) {
     RangeError.checkValidIndex(line, _lines);
-    final start = _times[line];
-    if (start == null) throw StateError('Line $line is not tapped yet');
+    if (_times[line] == null) throw StateError('Line $line is not tapped yet');
     final words =
-        _words[line] ??
-        (List<double?>.filled(splitWords(_lines[line]).length, null)
-          ..[0] = start);
+        _words[line] ?? List<double?>.filled(splitWords(_lines[line]).length, null);
     final i = words.indexOf(null);
     if (i < 0) return;
     words[i] = t;
     _words[line] = words;
   }
 
-  /// Removes the last word tap of [line]; the line goes back to line-only timing when
-  /// only the line time is left.
+  /// Removes the last word tap of [line]; the line goes back to line-only timing when no word
+  /// is left.
   void undoWord(int line) {
     RangeError.checkValidIndex(line, _lines);
     final words = _words[line];
     if (words == null) return;
     final i = words.lastIndexWhere((t) => t != null);
-    if (i > 0) words[i] = null;
-    if (i <= 1) _words[line] = null;
+    if (i >= 0) words[i] = null;
+    if (i <= 0) _words[line] = null;
+  }
+
+  /// Takes back all the word taps of [line]; it goes back to line-only timing (the line's own
+  /// time stays).
+  void resetWords(int line) {
+    RangeError.checkValidIndex(line, _lines);
+    _words[line] = null;
   }
 
   /// The tapped time of every line, null where not tapped yet. Read-only.

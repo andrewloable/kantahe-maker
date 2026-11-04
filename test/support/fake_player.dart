@@ -13,6 +13,10 @@ class FakePlayer implements TapPlayer {
   final opened = <({String path, Duration start, bool play})>[];
   final seeks = <Duration>[];
   final rates = <double>[];
+  final volumes = <double>[];
+
+  /// The last volume set (a player starts at full volume).
+  double volume = 1;
   bool disposed = false;
   final _pos = StreamController<Duration>.broadcast();
   final _dur = StreamController<Duration>.broadcast();
@@ -58,6 +62,12 @@ class FakePlayer implements TapPlayer {
 
   @override
   Future<void> setRate(double rate) async => rates.add(rate);
+
+  @override
+  Future<void> setVolume(double volume) async {
+    volumes.add(volume);
+    this.volume = volume;
+  }
 
   @override
   Future<void> dispose() async => disposed = true;

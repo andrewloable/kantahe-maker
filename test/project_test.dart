@@ -514,4 +514,40 @@ void main() {
       expectSame(await SongProject.load(dir), full());
     });
   });
+
+  group('opened karmp3 fields', () {
+    test('new_fields_round_trip', () {
+      final opened = full()
+        ..karmp3Path = '/x/a.karmp3'
+        ..audioFromKarmp3 = true
+        ..separator = 'Old-Model';
+      final back = SongProject.fromJson(
+        jsonDecode(jsonEncode(opened.toJson())) as Map<String, dynamic>,
+      );
+      expect(back.karmp3Path, '/x/a.karmp3');
+      expect(back.audioFromKarmp3, isTrue);
+      expect(back.separator, 'Old-Model');
+    });
+
+    test('old_json_without_them_loads', () {
+      final p = SongProject.fromJson({'id': 'x', 'inputPath': 'a.mp3'});
+      expect(p.karmp3Path, isNull);
+      expect(p.audioFromKarmp3, isFalse);
+      expect(p.separator, isNull);
+    });
+
+    test('wrong_types_are_refused', () {
+      for (final bad in [
+        {'karmp3Path': 5},
+        {'audioFromKarmp3': 'yes'},
+        {'separator': 3},
+      ]) {
+        expect(
+          () => SongProject.fromJson({'id': 'x', 'inputPath': 'a', ...bad}),
+          throwsFormatException,
+          reason: '$bad',
+        );
+      }
+    });
+  });
 }

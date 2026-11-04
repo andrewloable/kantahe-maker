@@ -6,9 +6,12 @@ import 'package:archive/archive.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:kantahe_maker/ai_timing.dart';
 import 'package:kantahe_maker/autofill.dart';
+import 'package:kantahe_maker/export.dart';
 import 'package:kantahe_maker/jobs.dart';
 import 'package:kantahe_maker/karmp3.dart' show karMp3Name;
+import 'package:kantahe_maker/karmp3_read.dart';
 import 'package:kantahe_maker/lyrics_lookup.dart';
 import 'package:kantahe_maker/screens/lyrics_search_panel.dart';
 import 'package:kantahe_maker/screens/song_info_panel.dart';
@@ -18,6 +21,7 @@ import 'package:kantahe_maker/pipeline.dart';
 import 'package:kantahe_maker/project.dart';
 import 'package:kantahe_maker/screens/song_screen.dart';
 import 'package:kantahe_maker/screens/tap_screen.dart';
+import 'package:kantahe_maker/settings.dart';
 import 'package:kantahe_maker/tools.dart';
 import 'package:kantahe_maker/wizard.dart';
 
@@ -76,10 +80,14 @@ class Song {
   double duration = 61.4;
   Object? durationError;
   final durationFiles = <String>[];
+  final mixes = <String>[];
+  int mixFailures = 0;
+  Completer<void>? mixGate;
   String? savePath;
   final suggested = <String>[];
   final revealed = <String>[];
   final player = FakePlayer();
+  final aiBytes = <Uint8List>[];
 
   /// What is on disk, for a failure message.
   String describe() => [
@@ -101,6 +109,10 @@ Future<Song> pumpSong(
   WidgetTester tester, {
   void Function(SongProject)? configure,
   bool source = false,
+  bool openedSource = false,
+  int mixFailures = 0,
+  Completer<void>? mixGate,
+  Future<String?> Function()? pickAudio,
   bool instrumental = false,
   bool vocals = false,
   bool settleAtOnce = true,
@@ -117,6 +129,8 @@ Future<Song> pumpSong(
   Future<SpotifyTrack> Function(String)? spotifyFinder,
   Future<AutofillResult> Function(SpotifyTrack, Future<double?>)? autofill,
   bool onTopOfHome = false,
+  AppSettings aiSettings = const AppSettings(),
+  Future<List<HeardWord>> Function(Uint8List, AppSettings)? aiTranscribe,
 }) async {
   final s = Song()
     ..toolsResult = toolsAvailable ? fakeTools : null
@@ -135,6 +149,10 @@ Future<Song> pumpSong(
     File('${s.dir.path}/source.mp3').writeAsStringSync('x');
     File('${s.dir.path}/source.wav').writeAsStringSync('x');
   }
+  // A song opened from a .karmp3 has source.mp3 but never source.wav.
+  if (openedSource) File('${s.dir.path}/source.mp3').writeAsStringSync('x');
+  s.mixFailures = mixFailures;
+  s.mixGate = mixGate;
   if (instrumental) {
     File('${s.dir.path}/instrumental.mp3').writeAsBytesSync([9, 9]);
   }
@@ -166,6 +184,16 @@ Future<Song> pumpSong(
       s.seps.add(job);
       return job;
     },
+    pickAudio: pickAudio ?? () async => null,
+    sourceFromStemsFn: (tools, work, onLine) async {
+      s.mixes.add(work.path);
+      await s.mixGate?.future;
+      if (s.mixFailures > 0) {
+        s.mixFailures--;
+        throw StateError('mix failed');
+      }
+      File('${work.path}/source.mp3').writeAsStringSync('x');
+    },
     durationFn: (tools, file) async {
       s.durationFiles.add(file);
       final e = s.durationError;
@@ -189,6 +217,11 @@ Future<Song> pumpSong(
         spotifyFinder ?? (link) async => throw StateError('no network in tests'),
     autofill:
         autofill ?? (track, audio) async => throw StateError('no network in tests'),
+    loadSettingsFn: () async => aiSettings,
+    aiTranscribeFn: (bytes, settings) async {
+      s.aiBytes.add(bytes);
+      return (aiTranscribe ?? (b, st) async => throw StateError('no network in tests'))(bytes, settings);
+    },
   );
   await tester.pumpWidget(
     onTopOfHome
@@ -518,6 +551,178 @@ void main() {
     });
   });
 
+  group('ai timing', () {
+    const keys = AppSettings(
+      cloudflareAccountId: 'acc',
+      cloudflareToken: 'tok',
+      cloudflareVerified: true,
+    );
+
+    HeardWord heard(String w, double t, {double confidence = 1}) =>
+        HeardWord(word: w, start: t, end: t + 0.3, confidence: confidence);
+
+    Future<Song> aiSong(
+      WidgetTester tester, {
+      AppSettings settings = keys,
+      String lyrics = 'a b\nc d',
+      List<HeardWord>? words,
+      Object? error,
+      bool vocals = true,
+    }) => pumpSong(
+      tester,
+      configure: (p) => named(p)..lyrics = lyrics,
+      source: true,
+      instrumental: true,
+      vocals: vocals,
+      aiSettings: settings,
+      aiTranscribe: (bytes, s) async {
+        if (error != null) throw error;
+        return words ?? [heard('a', 1), heard('b', 2), heard('c', 3), heard('d', 4)];
+      },
+    );
+
+    Future<void> press(WidgetTester tester, String key) async {
+      await tester.ensureVisible(find.byKey(ValueKey(key)));
+      await tester.tap(find.byKey(ValueKey(key)));
+      await settle(tester, seconds: 1);
+    }
+
+    Future<void> toReview(WidgetTester tester) async {
+      await press(tester, 'ai-time');
+      await press(tester, 'ai-send');
+      await settle(tester, until: () => find.byKey(const ValueKey('ai-review')).evaluate().isNotEmpty);
+    }
+
+    testWidgets('ai_button_hidden_without_keys', (tester) async {
+      await aiSong(tester, settings: const AppSettings());
+      expect(find.byType(TapScreen), findsOneWidget);
+      expect(find.byKey(const ValueKey('ai-time')), findsNothing);
+    });
+
+    testWidgets('ai_button_hidden_when_not_verified', (tester) async {
+      await aiSong(
+        tester,
+        settings: const AppSettings(cloudflareAccountId: 'acc', cloudflareToken: 'tok'),
+      );
+      expect(find.byType(TapScreen), findsOneWidget);
+      expect(find.byKey(const ValueKey('ai-time')), findsNothing);
+    });
+
+    testWidgets('ai_button_shown_when_ready', (tester) async {
+      await aiSong(tester);
+      expect(find.byKey(const ValueKey('ai-time')), findsOneWidget);
+    });
+
+    testWidgets('ai_consent_cancel_sends_nothing', (tester) async {
+      final s = await aiSong(tester);
+      await press(tester, 'ai-time');
+      expect(find.byKey(const ValueKey('ai-consent')), findsOneWidget);
+      await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
+      await settle(tester, seconds: 1);
+      expect(s.aiBytes, isEmpty);
+      expect(find.byKey(const ValueKey('ai-review')), findsNothing);
+    });
+
+    testWidgets('ai_times_the_words', (tester) async {
+      final s = await aiSong(tester);
+      await toReview(tester);
+      expect(find.textContaining('4 of 4'), findsOneWidget);
+      await press(tester, 'ai-apply');
+      await settle(tester, until: () => s.json()['timingSource'] == 'ai');
+      final times = (s.json()['times'] as List).cast<num>();
+      expect(times[0], closeTo(1 - aiLeadSeconds, 1e-6));
+      expect(times[1], closeTo(3 - aiLeadSeconds, 1e-6));
+      expect((s.json()['wordTimes'] as List)[1], hasLength(2));
+      expect(find.text('2/2 words'), findsNWidgets(2));
+    });
+
+    testWidgets('ai_review_names_the_unheard_lines', (tester) async {
+      await aiSong(tester, words: [heard('c', 3), heard('d', 4)]);
+      await toReview(tester);
+      expect(find.textContaining('No word of line 1'), findsOneWidget);
+    });
+
+    testWidgets('ai_review_has_no_warning_when_all_lines_were_heard', (tester) async {
+      await aiSong(tester);
+      await toReview(tester);
+      expect(find.textContaining('was heard'), findsNothing);
+    });
+
+    testWidgets('ai_missing_words_can_be_unticked', (tester) async {
+      final words = [
+        heard('a', 1), heard('b', 2), heard('c', 3), heard('d', 4), heard('x', 5), heard('e', 6), heard('f', 7),
+      ];
+      final s = await aiSong(tester, lyrics: 'a b\ne f', words: words);
+      await toReview(tester);
+      expect(find.byKey(const ValueKey('ai-add-0')), findsOneWidget);
+      expect(tester.widget<CheckboxListTile>(find.byKey(const ValueKey('ai-add-0'))).value, isTrue);
+      await tester.tap(find.byKey(const ValueKey('ai-add-0')));
+      await tester.pump();
+      await press(tester, 'ai-apply');
+      await settle(tester, until: () => s.json()['timingSource'] == 'ai');
+      expect(s.json()['lyrics'], 'a b\ne f');
+    });
+
+    testWidgets('ai_missing_words_are_added_and_timed', (tester) async {
+      final words = [
+        heard('a', 1), heard('b', 2), heard('c', 3), heard('d', 4), heard('x', 5), heard('e', 6), heard('f', 7),
+      ];
+      final s = await aiSong(tester, lyrics: 'a b\ne f', words: words);
+      await toReview(tester);
+      await press(tester, 'ai-apply');
+      await settle(tester, until: () => s.json()['timingSource'] == 'ai');
+      expect(s.json()['lyrics'], 'a b\nC d x\ne f');
+      final times = (s.json()['times'] as List).cast<num>();
+      expect(times, hasLength(3));
+      expect(times[1], closeTo(3 - aiLeadSeconds, 1e-6));
+    });
+
+    testWidgets('ai_error_is_shown', (tester) async {
+      final s = await aiSong(tester, error: const AiTimingException('Cloudflare is down'));
+      await press(tester, 'ai-time');
+      await press(tester, 'ai-send');
+      await settle(tester, until: () => shown('Cloudflare is down'));
+      expect(s.json()['timingSource'], 'tapped');
+      expect(find.byKey(const ValueKey('ai-review')), findsNothing);
+      expect(find.byKey(const ValueKey('ai-busy')), findsNothing);
+    });
+
+    testWidgets('ai_cancel_in_the_review_changes_nothing', (tester) async {
+      final s = await aiSong(tester);
+      await toReview(tester);
+      await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
+      await settle(tester, seconds: 1);
+      expect(s.json()['timingSource'], 'tapped');
+      expect((s.json()['times'] as List).every((t) => t == null), isTrue);
+    });
+
+    testWidgets('ai_then_tap_marks_corrected', (tester) async {
+      final s = await aiSong(tester);
+      await toReview(tester);
+      await press(tester, 'ai-apply');
+      await settle(tester, until: () => s.json()['timingSource'] == 'ai');
+      await tester.tap(find.byKey(const ValueKey('line-1')));
+      await settle(tester, until: () => s.json()['timingSource'] == 'ai+tapped');
+    });
+
+    testWidgets('ai_sends_the_vocals_else_the_song', (tester) async {
+      final a = await aiSong(tester);
+      await press(tester, 'ai-time');
+      await press(tester, 'ai-send');
+      await settle(tester, until: () => a.aiBytes.isNotEmpty);
+      expect(a.aiBytes.single, [5, 5], reason: 'vocals.mp3');
+    });
+
+    testWidgets('ai_sends_the_song_when_there_are_no_vocals', (tester) async {
+      final a = await aiSong(tester, vocals: false);
+      await press(tester, 'ai-time');
+      expect(find.textContaining('whole song'), findsOneWidget);
+      await press(tester, 'ai-send');
+      await settle(tester, until: () => a.aiBytes.isNotEmpty);
+      expect(a.aiBytes.single, 'x'.codeUnits, reason: 'source.mp3');
+    });
+  });
+
   group('timing', () {
     testWidgets('tap_screen_appears_with_source_and_lyrics', (tester) async {
       await pumpSong(
@@ -654,7 +859,7 @@ void main() {
         describe: s.describe,
       );
       expect(s.json()['wordTimes'], [
-        [1.0, 1.5],
+        [1.5, null],
         null,
       ]);
     });
@@ -2220,6 +2425,460 @@ void main() {
         describe: s.describe,
       );
       expect(s.json()['artist'], 'Singer');
+    });
+  });
+
+  group('opened song', () {
+    SongProject opened(SongProject p) => p
+      ..inputPath = '/x/a.karmp3'
+      ..karmp3Path = '/x/a.karmp3'
+      ..audioFromKarmp3 = true;
+
+    testWidgets('opened_song_without_vocals_needs_nothing', (tester) async {
+      final s = await pumpSong(
+        tester,
+        configure: opened,
+        instrumental: true,
+        openedSource: true,
+      );
+      await goTo(tester, WizardStep.song);
+      expect(shown('Opened from a.karmp3'), isTrue);
+      expect(shown('The audio is the one in the file'), isTrue);
+      expect(shown('File: '), isFalse);
+      expect(s.ensureCalls, 0, reason: 'no tools are needed');
+      expect(s.imports, isEmpty);
+      expect(s.seps, isEmpty);
+      expect(s.mixes, isEmpty);
+    });
+
+    testWidgets('opened_song_with_vocals_makes_the_source', (tester) async {
+      final s = await pumpSong(
+        tester,
+        configure: (p) => tappedSong(opened(p))..includeVocals = true,
+        instrumental: true,
+        vocals: true,
+      );
+      await settle(tester, until: () => File('${s.dir.path}/source.mp3').existsSync());
+      expect(s.mixes, [s.dir.path]);
+      expect(s.ensureCalls, 1);
+      expect(s.imports, isEmpty);
+      expect(s.seps, isEmpty);
+      await settle(tester, until: () => !shown('Preparing the song for timing'));
+      await goTo(tester, WizardStep.timing);
+      expect(find.byType(TapScreen), findsOneWidget);
+    });
+
+    testWidgets('opened_song_source_failure_shows_retry', (tester) async {
+      final s = await pumpSong(
+        tester,
+        configure: (p) => opened(p)..includeVocals = true,
+        instrumental: true,
+        vocals: true,
+        mixFailures: 1,
+      );
+      await settle(
+        tester,
+        until: () => shown('Could not prepare the song for timing'),
+      );
+      expect(shown('mix failed'), isTrue);
+      expect(find.text('Retry'), findsOneWidget);
+      await tester.tap(find.text('Retry'));
+      await settle(tester, until: () => File('${s.dir.path}/source.mp3').existsSync());
+      expect(s.mixes, hasLength(2));
+    });
+
+    testWidgets('opened_song_opens_on_export_when_complete', (tester) async {
+      await pumpSong(
+        tester,
+        configure: (p) => tappedSong(opened(p)),
+        instrumental: true,
+        openedSource: true,
+      );
+      expect(find.byKey(const ValueKey('export-name')), findsOneWidget);
+    });
+
+    testWidgets('opened_song_without_its_instrumental_says_so', (tester) async {
+      final s = await pumpSong(
+        tester,
+        configure: opened,
+        openedSource: true,
+      );
+      await settle(tester, until: () => shown('The audio of this song is missing'));
+      expect(s.seps, isEmpty, reason: 'there is nothing to split from');
+      expect(s.imports, isEmpty);
+    });
+
+    testWidgets('a_normal_song_is_unchanged', (tester) async {
+      final s = await pumpSong(tester, source: true, instrumental: true);
+      await goTo(tester, WizardStep.song);
+      expect(shown('File: in.mp4'), isTrue);
+      expect(shown('Opened from'), isFalse);
+      expect(s.mixes, isEmpty);
+    });
+  });
+
+  group('replace the audio', () {
+    SongProject opened(SongProject p) => tappedSong(p)
+      ..inputPath = '/x/a.karmp3'
+      ..karmp3Path = '/x/a.karmp3'
+      ..audioFromKarmp3 = true
+      ..separator = 'Old-Model'
+      ..includeVocals = true;
+
+    /// An opened song with its stems and a source, as after opening a file with vocals.
+    Future<Song> pumpOpened(WidgetTester tester, {String? picks = '/x/new.mp3'}) =>
+        pumpSong(
+          tester,
+          configure: opened,
+          instrumental: true,
+          vocals: true,
+          openedSource: true,
+          pickAudio: () async => picks,
+        );
+
+    Future<void> replaceWith(WidgetTester tester) async {
+      await goTo(tester, WizardStep.song);
+      await tester.tap(find.byKey(const ValueKey('replace-audio')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+    }
+
+    testWidgets('replace_button_only_for_opened_songs', (tester) async {
+      await pumpSong(tester, source: true, instrumental: true);
+      await goTo(tester, WizardStep.song);
+      expect(find.byKey(const ValueKey('replace-audio')), findsNothing);
+      await pumpSong(tester, configure: opened, instrumental: true, vocals: true, openedSource: true);
+      await goTo(tester, WizardStep.song);
+      expect(find.byKey(const ValueKey('replace-audio')), findsOneWidget);
+      expect(find.text('Replace the audio...'), findsOneWidget);
+    });
+
+    testWidgets('replace_audio_runs_import_and_split', (tester) async {
+      final s = await pumpOpened(tester);
+      await replaceWith(tester);
+      expect(
+        shown('The song is read from new.mp3 and split again'),
+        isTrue,
+        reason: 'the user is told first',
+      );
+      await tester.tap(find.byKey(const ValueKey('replace-audio-go')));
+      await settle(tester, until: () => s.seps.isNotEmpty);
+      expect(s.imports, ['/x/new.mp3']);
+      final j = s.json();
+      expect(j['inputPath'], '/x/new.mp3');
+      expect(j['audioFromKarmp3'], isFalse);
+      expect(j['separator'], isNull);
+      expect(j['karmp3Path'], '/x/a.karmp3', reason: 'Export can still save over the file');
+      expect(j['lyrics'], 'a\nb');
+      expect(j['times'], [1.0, 2.0]);
+      expect((j['title'], j['artist']), ('T', 'A'));
+      s.sep.finish();
+      await settle(tester, until: () => jobs.length == 0);
+    });
+
+    testWidgets('replace_audio_deletes_the_old_stems', (tester) async {
+      final s = await pumpOpened(tester);
+      await replaceWith(tester);
+      await tester.tap(find.byKey(const ValueKey('replace-audio-go')));
+      await settle(tester, until: () => s.seps.isNotEmpty);
+      // The split is running and has produced nothing yet: the old files are gone.
+      expect(File('${s.dir.path}/instrumental.mp3').existsSync(), isFalse);
+      expect(File('${s.dir.path}/vocals.mp3').existsSync(), isFalse);
+      s.sep.finish();
+      await settle(tester, until: () => jobs.length == 0);
+      expect(File('${s.dir.path}/instrumental.mp3').existsSync(), isTrue);
+    });
+
+    testWidgets('replace_audio_cancel_changes_nothing', (tester) async {
+      final s = await pumpOpened(tester);
+      await replaceWith(tester);
+      await tester.tap(find.byKey(const ValueKey('replace-audio-cancel')));
+      // Real time passes here, so anything that would wrongly go on has time to happen.
+      await settle(tester);
+      expect(s.imports, isEmpty);
+      expect(s.seps, isEmpty);
+      expect(File('${s.dir.path}/instrumental.mp3').existsSync(), isTrue);
+      expect(File('${s.dir.path}/vocals.mp3').existsSync(), isTrue);
+      expect(s.json()['audioFromKarmp3'], isTrue);
+    });
+
+    testWidgets('picking_no_file_changes_nothing', (tester) async {
+      final s = await pumpOpened(tester, picks: null);
+      await goTo(tester, WizardStep.song);
+      await tester.tap(find.byKey(const ValueKey('replace-audio')));
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.byKey(const ValueKey('replace-audio-go')), findsNothing);
+      expect(s.imports, isEmpty);
+    });
+
+    testWidgets('replaced_song_is_a_normal_song', (tester) async {
+      final s = await pumpOpened(tester);
+      await replaceWith(tester);
+      await tester.tap(find.byKey(const ValueKey('replace-audio-go')));
+      await settle(tester, until: () => s.seps.isNotEmpty);
+      expect(shown('File: new.mp3'), isTrue);
+      expect(shown('Opened from'), isFalse);
+      expect(find.byKey(const ValueKey('replace-audio')), findsNothing);
+      s.sep.finish();
+      await settle(tester, until: () => jobs.length == 0);
+    });
+
+    testWidgets('replace_button_is_disabled_while_the_stems_are_mixed', (tester) async {
+      final gate = Completer<void>();
+      final s = await pumpSong(
+        tester,
+        configure: opened,
+        instrumental: true,
+        vocals: true,
+        mixGate: gate,
+        pickAudio: () async => '/x/new.mp3',
+      );
+      await settle(tester, until: () => s.mixes.isNotEmpty);
+      await goTo(tester, WizardStep.song);
+      expect(
+        tester.widget<OutlinedButton>(find.byKey(const ValueKey('replace-audio'))).onPressed,
+        isNull,
+      );
+      gate.complete();
+      await settle(
+        tester,
+        until: () => tester
+            .widget<OutlinedButton>(find.byKey(const ValueKey('replace-audio')))
+            .onPressed != null,
+      );
+    });
+  });
+
+  group('save over', () {
+    /// An old .karmp3 on disk (made the app's way, stand-in MP3), the file the song was
+    /// "opened" from.
+    Future<String> oldFile(WidgetTester tester) async {
+      final dir = Directory.systemTemp.createTempSync('save_over');
+      addTearDown(() => deleteTemp(dir));
+      final work = Directory('${dir.path}/work')..createSync();
+      File('${work.path}/instrumental.mp3').writeAsBytesSync([9, 9]);
+      final path = '${dir.path}/a.karmp3';
+      await tester.runAsync(
+        () => exportKarMp3(
+          SongProject(id: 'x', inputPath: '/x/in.mp3')
+            ..title = 'T'
+            ..artist = 'A'
+            ..lyrics = 'old line'
+            ..times = [1.0],
+          work,
+          path,
+          durationSeconds: 10,
+        ),
+      );
+      return path;
+    }
+
+    /// The song opened from [path] and then edited (new lyrics), on its Export step.
+    Future<Song> pumpEdited(WidgetTester tester, String path, {Object? durationError}) =>
+        pumpSong(
+          tester,
+          configure: (p) => tappedSong(p)
+            ..lyrics = 'la la\nna na'
+            ..inputPath = path
+            ..karmp3Path = path
+            ..audioFromKarmp3 = true,
+          instrumental: true,
+          openedSource: true,
+          durationError: durationError,
+        );
+
+    List<String> lyricsIn(String path) =>
+        readKarMp3(File(path).readAsBytesSync()).lines.map((l) => l.text).toList();
+
+    Future<void> tapAndWait(WidgetTester tester, String key) async {
+      await tester.tap(find.byKey(ValueKey(key)));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+    }
+
+    testWidgets('save_over_replaces_the_file', (tester) async {
+      final path = await oldFile(tester);
+      expect(lyricsIn(path), ['old line']);
+      final s = await pumpEdited(tester, path);
+      await tapAndWait(tester, 'export-save-over');
+      expect(shown('Replace a.karmp3?'), isTrue, reason: 'the user is asked first');
+      await tapAndWait(tester, 'save-over-go');
+      await settle(tester, until: () => lyricsIn(path).length == 2);
+      expect(lyricsIn(path), ['la la', 'na na']);
+      expect(s.suggested, isEmpty, reason: 'no Save dialog');
+      expect(File('$path.part').existsSync(), isFalse);
+      await settle(tester, until: () => shown('Saved a.karmp3'));
+      expect(find.byKey(const ValueKey('export-done')), findsOneWidget);
+    });
+
+    testWidgets('save_over_cancel_keeps_the_file', (tester) async {
+      final path = await oldFile(tester);
+      final before = File(path).readAsBytesSync();
+      final s = await pumpEdited(tester, path);
+      await tapAndWait(tester, 'export-save-over');
+      await tapAndWait(tester, 'save-over-cancel');
+      // About a second passes, pumping all the while: a write that wrongly goes on needs
+      // both real time (file work) and pumps (the screen's awaits) to finish.
+      for (var i = 0; i < 20; i++) {
+        await tester.pump(const Duration(milliseconds: 20));
+        await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 30)));
+      }
+      expect(File(path).readAsBytesSync(), before);
+      expect(s.suggested, isEmpty);
+      expect(find.byKey(const ValueKey('export-done')), findsNothing);
+    });
+
+    testWidgets('save_over_only_for_opened_songs', (tester) async {
+      await pumpSong(tester, configure: tappedSong, source: true, instrumental: true);
+      expect(find.byKey(const ValueKey('export-save-over')), findsNothing);
+      expect(find.text('Export .karmp3'), findsOneWidget);
+      expect(find.byKey(const ValueKey('export-as')), findsNothing);
+    });
+
+    testWidgets('export_as_still_asks_and_leaves_the_opened_file', (tester) async {
+      final path = await oldFile(tester);
+      final before = File(path).readAsBytesSync();
+      final s = await pumpEdited(tester, path);
+      s.savePath = '${File(path).parent.path}/copy.karmp3';
+      expect(find.text('Export as...'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('export-as')));
+      await settle(tester, until: () => File(s.savePath!).existsSync());
+      expect(s.suggested, hasLength(1));
+      expect(lyricsIn(s.savePath!), ['la la', 'na na']);
+      expect(File(path).readAsBytesSync(), before);
+    });
+
+    testWidgets('save_over_missing_folder', (tester) async {
+      final path = await oldFile(tester);
+      final folder = File(path).parent;
+      final s = await pumpEdited(tester, path);
+      deleteTemp(folder);
+      await tapAndWait(tester, 'export-save-over');
+      await tapAndWait(tester, 'save-over-go');
+      await settle(tester, until: () => shown('The folder of a.karmp3 is gone; use Export as...'));
+      expect(File(path).existsSync(), isFalse);
+      expect(s.durationFiles, isEmpty, reason: 'nothing was started');
+    });
+
+    testWidgets('save_over_failure_keeps_the_old_file', (tester) async {
+      final path = await oldFile(tester);
+      final before = File(path).readAsBytesSync();
+      await pumpEdited(tester, path, durationError: StateError('no ffprobe'));
+      await tapAndWait(tester, 'export-save-over');
+      await tapAndWait(tester, 'save-over-go');
+      await settle(tester, until: () => shown('Save failed'));
+      expect(File(path).readAsBytesSync(), before);
+      expect(File('$path.part').existsSync(), isFalse);
+    });
+  });
+
+  group('preview', () {
+    Future<void> closePreview(WidgetTester tester) async {
+      await tester.tap(find.byKey(const ValueKey('preview-close')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+    }
+
+    testWidgets('preview_button_opens_the_dialog', (tester) async {
+      final s = await pumpSong(
+        tester,
+        configure: tappedSong,
+        source: true,
+        instrumental: true,
+      );
+      await tester.tap(find.byKey(const ValueKey('export-preview')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.byKey(const ValueKey('preview-dialog')), findsOneWidget);
+      expect(
+        find.descendant(of: find.byKey(const ValueKey('preview-dialog')), matching: find.text('T - A')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('preview-line-0')), findsOneWidget);
+      expect(find.byKey(const ValueKey('preview-line-1')), findsOneWidget);
+      // The song folder's own instrumental, never source.mp3, and no vocals controls.
+      expect(s.player.opened.map((o) => o.path), ['${s.dir.path}/instrumental.mp3']);
+      expect(find.byKey(const ValueKey('preview-vocals')), findsNothing);
+      await closePreview(tester);
+      expect(find.byKey(const ValueKey('preview-dialog')), findsNothing);
+      expect(s.player.disposed, isTrue);
+    });
+
+    testWidgets('preview_with_the_vocals_included', (tester) async {
+      final s = await pumpSong(
+        tester,
+        configure: (p) => tappedSong(p)..includeVocals = true,
+        source: true,
+        instrumental: true,
+        vocals: true,
+      );
+      await tester.tap(find.byKey(const ValueKey('export-preview')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(
+        s.player.opened.map((o) => o.path).toSet(),
+        {'${s.dir.path}/instrumental.mp3', '${s.dir.path}/vocals.mp3'},
+      );
+      expect(find.byKey(const ValueKey('preview-vocals')), findsOneWidget);
+      await closePreview(tester);
+    });
+
+    testWidgets('preview_without_the_vocals_ticked_has_none', (tester) async {
+      // The song has a vocals file, but the export is without it.
+      final s = await pumpSong(
+        tester,
+        configure: tappedSong,
+        source: true,
+        instrumental: true,
+        vocals: true,
+      );
+      await tester.tap(find.byKey(const ValueKey('export-preview')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(s.player.opened.map((o) => o.path), ['${s.dir.path}/instrumental.mp3']);
+      expect(find.byKey(const ValueKey('preview-vocals')), findsNothing);
+      await closePreview(tester);
+    });
+
+    testWidgets('preview_button_disabled_until_ready', (tester) async {
+      final s = await pumpSong(tester, configure: tappedSong, source: true);
+      await settle(tester, until: () => s.seps.isNotEmpty);
+      await goTo(tester, WizardStep.export);
+      expect(
+        tester.widget<OutlinedButton>(find.byKey(const ValueKey('export-preview'))).onPressed,
+        isNull,
+        reason: 'vocal splitting is still running',
+      );
+      s.sep.finish();
+      await settle(tester, until: () => jobs.length == 0);
+      expect(
+        tester.widget<OutlinedButton>(find.byKey(const ValueKey('export-preview'))).onPressed,
+        isNotNull,
+      );
+    });
+
+    testWidgets('preview_matches_the_export', (tester) async {
+      final s = await pumpSong(
+        tester,
+        configure: (p) => tappedSong(p)..offset = 0.2,
+        source: true,
+        instrumental: true,
+      );
+      // What the export writes ...
+      s.savePath = '${s.dir.path}/out.karmp3';
+      await tester.tap(find.text('Export .karmp3'));
+      await settle(tester, until: () => find.byKey(const ValueKey('export-done')).evaluate().isNotEmpty);
+      final exported = readKarMp3(File(s.savePath!).readAsBytesSync()).lines;
+      expect(exported.first.seconds, closeTo(1.2, 1e-9));
+      // ... is what the preview jumps to when its first line is tapped.
+      await tester.tap(find.byKey(const ValueKey('export-preview')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.tap(find.byKey(const ValueKey('preview-line-0')));
+      await tester.pump();
+      expect(s.player.seeks.last, const Duration(milliseconds: 1200));
+      expect(exported.map((l) => l.text), ['a', 'b']);
+      await closePreview(tester);
     });
   });
 }

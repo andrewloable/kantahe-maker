@@ -56,6 +56,15 @@ List<String> sourceMp3Args(String input, String out, {required bool copy}) => [
       '-f', 'mp3', out,
     ];
 
+/// ffmpeg: [instrumental] and [vocals] mixed into one stereo MP3, the song as it sounded before
+/// its vocals were split off (for the Timing step of a song opened from a .karmp3).
+List<String> mixStemsArgs(String instrumental, String vocals, String out) => [
+      '-y', '-i', instrumental, '-i', vocals,
+      '-filter_complex', '[0:a][1:a]amix=inputs=2:duration=longest:normalize=0[a]',
+      '-map', '[a]', '-c:a', 'libmp3lame', '-q:a', '2', '-ar', '44100', '-ac', '2',
+      '-f', 'mp3', out,
+    ];
+
 /// ffmpeg: the first audio stream as 44.1 kHz stereo 16-bit PCM in a WAV file.
 List<String> sourceWavArgs(String input, String out) => [
       '-y', '-i', input, '-vn', '-map', '0:a:0',
@@ -311,6 +320,32 @@ Future<void> importSong(
   }
   await retryBusy(() => File(partMp3).rename(p.join(work.path, 'source.mp3')));
   await retryBusy(() => File(partWav).rename(p.join(work.path, 'source.wav')));
+}
+
+/// Makes work/source.mp3 by mixing work/instrumental.mp3 and work/vocals.mp3 (a .karmp3 holds
+/// no original audio). It is written as source.part.mp3 first, so a file named source.mp3 is
+/// always complete; on an error nothing is left behind.
+Future<void> makeSourceFromStems(
+  ToolPaths t,
+  Directory work, {
+  void Function(String line)? onLine,
+}) async {
+  final part = p.join(work.path, 'source.part.mp3');
+  try {
+    await runLogged(
+      t.ffmpeg,
+      mixStemsArgs(
+        p.join(work.path, 'instrumental.mp3'),
+        p.join(work.path, 'vocals.mp3'),
+        part,
+      ),
+      onLine: onLine,
+    );
+  } catch (_) {
+    deleteQuietly(File(part));
+    rethrow;
+  }
+  await retryBusy(() => File(part).rename(p.join(work.path, 'source.mp3')));
 }
 
 /// The length of an audio file in seconds, from ffprobe.

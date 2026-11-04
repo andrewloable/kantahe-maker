@@ -110,11 +110,12 @@ Future<void> exportKarMp3(
   final title = oneLine(p.title), artist = oneLine(p.artist);
   final composer = oneLine(p.composer), lyricist = oneLine(p.lyricist);
   final name = karMp3Name(number: p.number, artist: artist, title: title);
+  final exported = session.exportLines();
   final lrc = buildLrc(
     title: title,
     artist: artist,
     composer: composer,
-    lines: session.exportLines(),
+    lines: exported,
   );
   final nfo = Nfo(
     title: title,
@@ -124,15 +125,18 @@ Future<void> exportKarMp3(
     lyricist: lyricist,
     seconds: durationSeconds.round(),
     audio: instrumentalInfo == null ? '' : describeMp3(instrumentalInfo),
-    separator: separatorModel.replaceAll(RegExp(r'\.onnx$'), ''),
+    separator: p.separator ?? separatorModel.replaceAll(RegExp(r'\.onnx$'), ''),
     instrumental: '$name.mp3',
     vocals: p.includeVocals ? '$name.vocals.mp3' : '',
     vocalsAudio: vocalsInfo == null ? '' : describeMp3(vocalsInfo, withChannels: true),
     lyricLines: lines.length,
+    wordTiming: exported.any((l) => l.words.isNotEmpty),
     lyricTiming: switch (p.timingSource) {
       'lrclib' => 'from lrclib.net synced lyrics',
       'lrclib+tapped' =>
         'from lrclib.net synced lyrics, corrected by hand in Kantahe Maker',
+      'ai' => lyricTimingAi,
+      'ai+tapped' => lyricTimingAiTapped,
       _ => 'tapped by hand in Kantahe Maker',
     },
   ).toString();

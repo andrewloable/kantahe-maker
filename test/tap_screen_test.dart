@@ -582,12 +582,13 @@ void main() {
       await tester.pump();
       await tapWordAt(tester, h, 1.4);
       expect(h.wordChanges.last, [
-        [1.0, 1.4, null],
+        [1.4, null, null],
         null,
-      ]);
+      ], reason: 'the first press times the first word');
       await tapWordAt(tester, h, 1.9);
+      await tapWordAt(tester, h, 2.3);
       expect(h.wordChanges.last, [
-        [1.0, 1.4, 1.9],
+        [1.4, 1.9, 2.3],
         null,
       ]);
       expect(h.changes, isEmpty, reason: 'the line taps did not change');
@@ -634,10 +635,40 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('line-0')));
       await tester.pump();
       await tapWordAt(tester, h, 1.5);
+      await tapWordAt(tester, h, 1.7);
       await tapWordAt(tester, h, 2.5);
+      await tapWordAt(tester, h, 2.7);
       expect(h.wordChanges.last, [
-        [1.0, 1.5],
-        [2.0, 2.5],
+        [1.5, 1.7],
+        [2.5, 2.7],
+      ]);
+    });
+
+    testWidgets('the_next_line_starts_at_its_first_word', (tester) async {
+      // Reported: after the last word of a line the selection landed on the 2nd word of the
+      // next line, and again after the next line.
+      final h = await pumpScreen(
+        tester,
+        lines: const ['a b', 'c d', 'e f'],
+        times: const [1.0, 2.0, 3.0],
+      );
+      await wordModeOn(tester);
+      await tester.tap(find.byKey(const ValueKey('line-0')));
+      await tester.pump();
+      await tapWordAt(tester, h, 1.2);
+      await tapWordAt(tester, h, 1.5);
+      await tapWordAt(tester, h, 2.2);
+      expect(h.wordChanges.last, [
+        [1.2, 1.5],
+        [2.2, null],
+        null,
+      ]);
+      await tapWordAt(tester, h, 2.5);
+      await tapWordAt(tester, h, 3.2);
+      expect(h.wordChanges.last, [
+        [1.2, 1.5],
+        [2.2, 2.5],
+        [3.2, null],
       ]);
     });
 
@@ -652,12 +683,16 @@ void main() {
       await wordModeOn(tester);
       await tester.tap(find.byKey(const ValueKey('line-0')));
       await tester.pump();
-      await tapWordAt(tester, h, 1.5); // line 0 is done, line 1 is selected
+      await tapWordAt(tester, h, 1.5);
+      await tapWordAt(tester, h, 1.6); // line 0 is done, line 1 is selected
       await press(tester, LogicalKeyboardKey.backspace);
-      expect(h.wordChanges.last, [null, null]);
-      await tapWordAt(tester, h, 1.6);
       expect(h.wordChanges.last, [
-        [1.0, 1.6],
+        [1.5, null],
+        null,
+      ]);
+      await tapWordAt(tester, h, 1.7);
+      expect(h.wordChanges.last, [
+        [1.5, 1.7],
         null,
       ], reason: 'the line is selected again');
     });
@@ -716,6 +751,327 @@ void main() {
       await tester.pump();
       await tapWordAt(tester, h, 1.4);
       expect(h.wordChanges, isEmpty);
+    });
+  });
+
+  group('word highlight', () {
+    // Made-up lyrics only.
+    const lines = ['Hello big world', 'bye now'];
+
+    /// The marks of the words of row [line]: 'lit', 'current' (underlined) or 'plain'. A row shown
+    /// as plain text has [words] plain marks.
+    List<String> marksOf(WidgetTester tester, int line, int words) {
+      final text = tester.widget<Text>(find.byKey(ValueKey('line-text-$line')));
+      final span = text.textSpan;
+      if (span == null) return List.filled(words, 'plain');
+      final scheme = Theme.of(
+        tester.element(find.byKey(ValueKey('line-$line'))),
+      ).colorScheme;
+      return [
+        for (final s in (span as TextSpan).children!.cast<TextSpan>())
+          s.style?.decoration == TextDecoration.underline
+              ? 'current'
+              : s.style?.color == scheme.primary
+              ? 'lit'
+              // An unlit word has its own colour: a selected row tints its text with the
+              // primary colour, which would hide the difference.
+              : s.style?.color == scheme.onSurface
+              ? 'plain'
+              : 'other',
+      ];
+    }
+
+    Future<Harness> screen(
+      WidgetTester tester, {
+      List<List<double?>?> words = const [],
+      double offset = 0,
+    }) => pumpScreen(
+      tester,
+      lines: lines,
+      times: const [1.0, 2.0],
+      wordTimes: words,
+      offset: offset,
+    );
+
+    Future<void> wordOn(WidgetTester tester) async {
+      await tester.tap(find.byKey(const ValueKey('word-mode')));
+      await tester.pump();
+    }
+
+    Future<void> tapWord(WidgetTester tester, Harness h, double seconds) async {
+      h.player.position = Duration(microseconds: (seconds * 1e6).round());
+      await press(tester, LogicalKeyboardKey.space);
+    }
+
+    Future<void> playAt(WidgetTester tester, Harness h, int ms) async {
+      h.player.moveTo(Duration(milliseconds: ms));
+      // The screen follows the player one pump later.
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+
+    testWidgets('word_mode_shows_the_timed_and_the_next_word', (tester) async {
+      final h = await screen(tester);
+      await wordOn(tester);
+      await tester.tap(find.byKey(const ValueKey('line-0')));
+      await tester.pump();
+      // Nothing is lit before the first Space: only the word it will time is underlined.
+      expect(marksOf(tester, 0, 3), ['current', 'plain', 'plain']);
+      await tapWord(tester, h, 1.4);
+      expect(marksOf(tester, 0, 3), ['current', 'plain', 'plain'], reason: 'the first word is being sung');
+      await tapWord(tester, h, 1.9);
+      expect(marksOf(tester, 0, 3), ['lit', 'current', 'plain']);
+      await tapWord(tester, h, 2.3);
+      // The last word is being sung; the selection moved on to the next line, at its first word.
+      expect(marksOf(tester, 0, 3), ['lit', 'lit', 'lit'], reason: 'no underline off the selected line');
+      expect(marksOf(tester, 1, 2), ['current', 'plain']);
+    });
+
+    testWidgets('word_mode_shows_no_next_word_on_other_lines', (tester) async {
+      await screen(
+        tester,
+        words: const [
+          [1.0, 1.4, null],
+          null,
+        ],
+      );
+      await wordOn(tester);
+      await tester.tap(find.byKey(const ValueKey('line-1')));
+      await tester.pump();
+      // Line 0 is half timed: its timed words are lit, but only the selected line has a next word.
+      expect(marksOf(tester, 0, 3), ['lit', 'lit', 'plain']);
+      expect(marksOf(tester, 1, 2), ['current', 'plain']);
+    });
+
+    testWidgets('backspace_takes_the_mark_back', (tester) async {
+      final h = await screen(tester);
+      await wordOn(tester);
+      await tester.tap(find.byKey(const ValueKey('line-0')));
+      await tester.pump();
+      await tapWord(tester, h, 1.4);
+      await tapWord(tester, h, 1.9);
+      expect(marksOf(tester, 0, 3), ['lit', 'current', 'plain']);
+      await press(tester, LogicalKeyboardKey.backspace);
+      expect(h.wordChanges.last, [
+        [1.4, null, null],
+        null,
+      ]);
+      expect(marksOf(tester, 0, 3), ['current', 'plain', 'plain']);
+      await press(tester, LogicalKeyboardKey.backspace);
+      expect(h.wordChanges.last, [null, null]);
+      expect(marksOf(tester, 0, 3), ['current', 'plain', 'plain']);
+    });
+
+    testWidgets('playing_lights_the_words_one_by_one', (tester) async {
+      final h = await screen(
+        tester,
+        words: const [
+          [1.0, 1.4, 1.9],
+          null,
+        ],
+      );
+      await playAt(tester, h, 1500);
+      expect(marksOf(tester, 0, 3), ['lit', 'lit', 'plain']);
+      await playAt(tester, h, 1950);
+      expect(marksOf(tester, 0, 3), ['lit', 'lit', 'lit']);
+      // Line 1 is being sung now: line 0 is plain again.
+      await playAt(tester, h, 2500);
+      expect(marksOf(tester, 0, 3), ['plain', 'plain', 'plain']);
+    });
+
+    testWidgets('playing_uses_the_offset', (tester) async {
+      final h = await screen(
+        tester,
+        words: const [
+          [1.0, 1.4, 1.9],
+          null,
+        ],
+        offset: 0.3,
+      );
+      await playAt(tester, h, 1500);
+      expect(marksOf(tester, 0, 3), ['lit', 'plain', 'plain']);
+    });
+
+    testWidgets('nothing_lights_before_the_first_line', (tester) async {
+      final h = await screen(
+        tester,
+        words: const [
+          [1.0, 1.4, 1.9],
+          null,
+        ],
+      );
+      await playAt(tester, h, 500);
+      expect(marksOf(tester, 0, 3), ['plain', 'plain', 'plain']);
+    });
+
+    testWidgets('lines_without_word_times_stay_plain', (tester) async {
+      final h = await screen(
+        tester,
+        words: const [
+          [1.0, 1.4, 1.9],
+          null,
+        ],
+      );
+      await playAt(tester, h, 2500);
+      expect(marksOf(tester, 1, 2), ['plain', 'plain']);
+      expect(
+        tester.widget<Text>(find.byKey(const ValueKey('line-text-1'))).data,
+        'bye now',
+        reason: 'shown as plain text, as before',
+      );
+    });
+  });
+
+  group('word reset', () {
+    // Made-up lyrics only.
+    const lines = ['Hello big world', 'bye now'];
+
+    Future<Harness> screen(
+      WidgetTester tester, {
+      List<List<double?>?> words = const [],
+    }) => pumpScreen(tester, lines: lines, times: const [1.0, 2.0], wordTimes: words);
+
+    Future<void> wordOn(WidgetTester tester) async {
+      await tester.tap(find.byKey(const ValueKey('word-mode')));
+      await tester.pump();
+    }
+
+    Future<void> tapWord(WidgetTester tester, Harness h, double seconds) async {
+      h.player.position = Duration(microseconds: (seconds * 1e6).round());
+      await press(tester, LogicalKeyboardKey.space);
+    }
+
+    Future<void> clickLine(WidgetTester tester, int i) async {
+      await tester.tap(find.byKey(ValueKey('line-$i')));
+      await tester.pump();
+    }
+
+    VoidCallback? resetAction(WidgetTester tester) =>
+        tester.widget<OutlinedButton>(find.byKey(const ValueKey('word-reset'))).onPressed;
+
+    testWidgets('reset_button_clears_the_selected_lines_words', (tester) async {
+      final h = await screen(tester);
+      await wordOn(tester);
+      await clickLine(tester, 0);
+      await tapWord(tester, h, 1.4);
+      await tapWord(tester, h, 1.9);
+      await tapWord(tester, h, 2.3);
+      expect(h.wordChanges.last, [
+        [1.4, 1.9, 2.3],
+        null,
+      ]);
+      // The selection moved on by itself; go back to line 0 and reset it.
+      await clickLine(tester, 0);
+      final seeksBefore = h.player.seeks.length;
+      await tester.tap(find.byKey(const ValueKey('word-reset')));
+      await tester.pump();
+      expect(h.wordChanges.last, [null, null]);
+      expect(h.changes, isEmpty, reason: 'the line taps did not change');
+      expect(h.player.seeks.length, seeksBefore + 1, reason: 'the reset itself seeks');
+      expect(h.player.seeks.last, const Duration(seconds: 1), reason: 'ready to time it again');
+      expect(find.text('3/3 words'), findsNothing);
+      // And the line can be timed again at once.
+      await tapWord(tester, h, 1.5);
+      expect(h.wordChanges.last, [
+        [1.5, null, null],
+        null,
+      ]);
+    });
+
+    testWidgets('reset_button_state', (tester) async {
+      final h = await screen(tester);
+      expect(find.byKey(const ValueKey('word-reset')), findsNothing, reason: 'word timing is off');
+      await wordOn(tester);
+      expect(find.byKey(const ValueKey('word-reset')), findsOneWidget);
+      expect(resetAction(tester), isNull, reason: 'the selected line has no word times');
+      await tapWord(tester, h, 1.4);
+      expect(resetAction(tester), isNotNull);
+    });
+
+    testWidgets('reset_leaves_other_lines_alone', (tester) async {
+      final h = await screen(
+        tester,
+        words: const [
+          [1.0, 1.4, 1.9],
+          [2.0, 2.5],
+        ],
+      );
+      await wordOn(tester);
+      await clickLine(tester, 1);
+      await tester.tap(find.byKey(const ValueKey('word-reset')));
+      await tester.pump();
+      expect(h.wordChanges.last, [
+        [1.0, 1.4, 1.9],
+        null,
+      ]);
+    });
+
+    testWidgets('reset_is_off_in_the_preview', (tester) async {
+      final h = await screen(
+        tester,
+        words: const [
+          [1.0, 1.4, 1.9],
+          null,
+        ],
+      );
+      await wordOn(tester);
+      await clickLine(tester, 0);
+      await tester.tap(find.byKey(const ValueKey('preview')));
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('word-reset')), warnIfMissed: false);
+      await tester.pump();
+      expect(h.wordChanges, isEmpty, reason: 'previewing never changes the taps');
+    });
+
+    testWidgets('backspace_after_a_click_stays_on_the_selected_line', (tester) async {
+      final h = await screen(
+        tester,
+        words: const [
+          [1.0, 1.4, 1.9],
+          null,
+        ],
+      );
+      await wordOn(tester);
+      await clickLine(tester, 1);
+      await press(tester, LogicalKeyboardKey.backspace);
+      expect(h.wordChanges, isEmpty, reason: 'line 1 has nothing to take back');
+      expect(find.text('3/3 words'), findsOneWidget, reason: 'line 0 keeps all its words');
+    });
+
+    testWidgets('backspace_after_clicking_the_line_it_moved_to_stays_there', (tester) async {
+      final h = await screen(tester);
+      await wordOn(tester);
+      await clickLine(tester, 0);
+      await tapWord(tester, h, 1.4);
+      await tapWord(tester, h, 1.9);
+      await tapWord(tester, h, 2.3);
+      final before = h.wordChanges.length;
+      // The selection moved on to line 1 by itself; clicking it makes it the user's choice.
+      await clickLine(tester, 1);
+      await press(tester, LogicalKeyboardKey.backspace);
+      expect(h.wordChanges.length, before, reason: 'line 1 has nothing to take back');
+      expect(find.text('3/3 words'), findsOneWidget);
+    });
+
+    testWidgets('backspace_after_finishing_a_line_goes_back_and_goes_on', (tester) async {
+      final h = await screen(tester);
+      await wordOn(tester);
+      await clickLine(tester, 0);
+      await tapWord(tester, h, 1.4);
+      await tapWord(tester, h, 1.9);
+      await tapWord(tester, h, 2.3);
+      await press(tester, LogicalKeyboardKey.backspace);
+      expect(h.wordChanges.last, [
+        [1.4, 1.9, null],
+        null,
+      ]);
+      await press(tester, LogicalKeyboardKey.backspace);
+      expect(h.wordChanges.last, [
+        [1.4, null, null],
+        null,
+      ]);
+      await press(tester, LogicalKeyboardKey.backspace);
+      expect(h.wordChanges.last, [null, null]);
     });
   });
 }

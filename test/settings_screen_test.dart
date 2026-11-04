@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:kantahe_maker/ai_timing.dart';
 import 'package:kantahe_maker/screens/settings_screen.dart';
 import 'package:kantahe_maker/settings.dart';
 import 'package:kantahe_maker/tools.dart';
@@ -204,6 +205,119 @@ void main() {
       expect(r.calls, isEmpty);
       expect(r.saved, [false]);
       expect(isOn(tester), isFalse);
+    });
+  });
+
+  group('cloudflare keys', () {
+    Future<({List<AppSettings> saved, List<(String, String)> verified})> pumpKeys(
+      WidgetTester tester, {
+      AppSettings loaded = const AppSettings(),
+      Object? verifyError,
+    }) async {
+      final out = (saved: <AppSettings>[], verified: <(String, String)>[]);
+      await tester.binding.setSurfaceSize(const Size(900, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(MaterialApp(
+        home: SettingsScreen(
+          status: () async => {'ffmpeg': null},
+          showGraphicsCard: true,
+          loadSettings: () async => loaded,
+          saveSettings: (s) async => out.saved.add(s),
+          hasGraphicsSupport: () async => true,
+          verifyCloudflare: (account, token) async {
+            out.verified.add((account, token));
+            if (verifyError != null) throw verifyError;
+          },
+        ),
+      ));
+      await tester.pumpAndSettle();
+      return out;
+    }
+
+    Future<void> save(WidgetTester tester, {String? account, String? token}) async {
+      if (account != null) await tester.enterText(find.byKey(const ValueKey('cf-account')), account);
+      if (token != null) await tester.enterText(find.byKey(const ValueKey('cf-token')), token);
+      await tester.ensureVisible(find.byKey(const ValueKey('cf-save')));
+      await tester.tap(find.byKey(const ValueKey('cf-save')));
+      await tester.pumpAndSettle();
+    }
+
+    String status(WidgetTester tester) =>
+        tester.widget<Text>(find.byKey(const ValueKey('cf-status'))).data!;
+
+    testWidgets('settings_cloudflare_save_tests_then_saves', (tester) async {
+      final r = await pumpKeys(tester, loaded: const AppSettings(useGraphicsCard: true));
+      await save(tester, account: '  acc123 ', token: ' tok456  ');
+      expect(r.verified, [('acc123', 'tok456')]);
+      expect(r.saved, hasLength(2), reason: 'the values first, the result of the test after');
+      expect(r.saved.first.cloudflareVerified, isFalse);
+      expect(r.saved.last.cloudflareAccountId, 'acc123');
+      expect(r.saved.last.cloudflareToken, 'tok456');
+      expect(r.saved.last.cloudflareVerified, isTrue);
+      expect(r.saved.last.useGraphicsCard, isTrue, reason: 'the other setting is kept');
+      expect(status(tester), contains('works'));
+    });
+
+    testWidgets('settings_cloudflare_failed_test_keeps_values_unverified', (tester) async {
+      final r = await pumpKeys(
+        tester,
+        loaded: const AppSettings(
+          cloudflareAccountId: 'old', cloudflareToken: 'oldtok', cloudflareVerified: true),
+        verifyError: const AiTimingException('Cloudflare refused the request'),
+      );
+      await save(tester, token: 'newtok');
+      expect(r.saved.last.cloudflareAccountId, 'old');
+      expect(r.saved.last.cloudflareToken, 'newtok');
+      expect(r.saved.last.cloudflareVerified, isFalse, reason: 'changed values are tested again');
+      expect(status(tester), contains('Cloudflare refused the request'));
+      expect(status(tester), contains('hidden'));
+      expect(status(tester), isNot(contains('newtok')));
+    });
+
+    testWidgets('settings_cloudflare_unexpected_error_is_shown', (tester) async {
+      await pumpKeys(tester, verifyError: StateError('boom'));
+      await save(tester, account: 'a', token: 't');
+      expect(status(tester), contains('test failed'));
+    });
+
+    testWidgets('settings_cloudflare_empty_values_skip_the_test', (tester) async {
+      final r = await pumpKeys(
+        tester,
+        loaded: const AppSettings(
+          cloudflareAccountId: 'a', cloudflareToken: 't', cloudflareVerified: true),
+      );
+      await save(tester, token: '');
+      expect(r.verified, isEmpty);
+      expect(r.saved.last.cloudflareVerified, isFalse);
+      expect(status(tester), contains('off'));
+    });
+
+    testWidgets('settings_cloudflare_shows_what_was_saved', (tester) async {
+      await pumpKeys(
+        tester,
+        loaded: const AppSettings(cloudflareAccountId: 'acc', cloudflareToken: 'tok'),
+      );
+      expect(find.text('acc'), findsOneWidget);
+    });
+
+    testWidgets('settings_token_is_obscured', (tester) async {
+      await pumpKeys(tester, loaded: const AppSettings(cloudflareToken: 'secret-token'));
+      final field = tester.widget<TextField>(find.byKey(const ValueKey('cf-token')));
+      expect(field.obscureText, isTrue);
+    });
+
+    testWidgets('settings_graphics_save_keeps_cloudflare', (tester) async {
+      final r = await pumpKeys(
+        tester,
+        loaded: const AppSettings(
+          cloudflareAccountId: 'acc', cloudflareToken: 'tok', cloudflareVerified: true),
+      );
+      await tester.tap(find.byKey(const ValueKey('graphics-card')));
+      await tester.pumpAndSettle();
+      expect(r.saved.single.useGraphicsCard, isTrue);
+      expect(r.saved.single.cloudflareAccountId, 'acc');
+      expect(r.saved.single.cloudflareToken, 'tok');
+      expect(r.saved.single.cloudflareVerified, isTrue);
     });
   });
 

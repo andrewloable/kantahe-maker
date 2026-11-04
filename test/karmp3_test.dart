@@ -116,7 +116,8 @@ void main() {
         'Vocals removed : UVR-MDX-NET-Inst_HQ_3\n'
         'Instrumental   : N.mp3\n'
         'Lyrics         : timed (.lrc, 3 lines)\n'
-        'Lyric timing   : tapped by hand in Kantahe Maker\n',
+        'Lyric timing   : tapped by hand in Kantahe Maker\n'
+        'Timing by      : line\n',
       );
     });
     test('nfo_with_vocals', () {
@@ -131,8 +132,22 @@ void main() {
         'Vocals         : N.vocals.mp3\n'
         'Vocals audio   : MP3, 44.1 kHz, 64 kbps, mono\n'
         'Lyrics         : timed (.lrc, 3 lines)\n'
-        'Lyric timing   : tapped by hand in Kantahe Maker\n',
+        'Lyric timing   : tapped by hand in Kantahe Maker\n'
+        'Timing by      : line\n',
       );
+    });
+    test('nfo_timing_by_word', () {
+      final rows = Nfo(
+        title: 'T',
+        artist: 'A',
+        seconds: 295,
+        audio: '',
+        separator: 'M',
+        instrumental: 'N.mp3',
+        lyricLines: 3,
+        wordTiming: true,
+      ).toString().split('\n');
+      expect(rows[rows.length - 2], 'Timing by      : word');
     });
     test('nfo_number', () {
       final lines = nfo(number: 7).toString().split('\n');

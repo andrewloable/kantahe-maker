@@ -98,6 +98,19 @@ void main() {
 
     String text(Uint8List b) => utf8.decode(b);
 
+    test('export_keeps_the_opened_separator', () async {
+      final dest = '${tmp.path}/sep.karmp3';
+      await exportKarMp3(
+        ready()..separator = 'Old-Model',
+        work,
+        dest,
+        durationSeconds: 10,
+      );
+      final nfo = text(entries(dest)['A - T.nfo']!);
+      expect(nfo.split('\n'), contains('Vocals removed : Old-Model'));
+      // Without one, the model of this version is named (export_content checks that).
+    });
+
     test('export_content', () async {
       final dest = '${tmp.path}/out.karmp3';
       await exportKarMp3(ready(offset: -0.5), work, dest, durationSeconds: 61.4);
@@ -110,6 +123,7 @@ void main() {
       expect(nfo.split('\n'), contains('Vocals removed : UVR-MDX-NET-Inst_HQ_3'),
           reason: 'the model name without its file extension, on a line of its own');
       expect(nfo, contains('Lyrics         : timed (.lrc, 2 lines)'));
+      expect(nfo.split('\n'), contains('Timing by      : line'));
       expect(File('$dest.part').existsSync(), isFalse);
     });
 
@@ -120,6 +134,14 @@ void main() {
         (
           'lrclib+tapped',
           'Lyric timing   : from lrclib.net synced lyrics, corrected by hand in Kantahe Maker',
+        ),
+        (
+          'ai',
+          'Lyric timing   : automatic: words timed by Deepgram Nova-3 on Cloudflare Workers AI',
+        ),
+        (
+          'ai+tapped',
+          'Lyric timing   : automatic: words timed by Deepgram Nova-3 on Cloudflare Workers AI, corrected by hand in Kantahe Maker',
         ),
       ]) {
         final dest = '${tmp.path}/$source.karmp3';
@@ -210,6 +232,7 @@ void main() {
           '[ti:T]\n[ar:A]\n'
           '[00:01.00]<00:01.00>Hello <00:01.40>big <00:01.90>world\n'
           '[00:02.00]bye\n');
+      expect(text(entries(dest)['A - T.nfo']!).split('\n'), contains('Timing by      : word'));
     });
 
     test('export_with_vocals', () async {

@@ -47,9 +47,16 @@ Nfo exampleNfo() => Nfo(
   vocals: '$name.vocals.mp3',
   vocalsAudio: 'MP3, 44.1 kHz, 48 kbps, mono',
   lyricLines: 4,
+  wordTiming: true,
 );
 
 void main() {
+  test('readme_lists_the_ai_lyric_timing_values', () {
+    final readme = File('README.md').readAsStringSync();
+    expect(readme, contains(lyricTimingAi));
+    expect(readme, contains(lyricTimingAiTapped.substring(lyricTimingAi.length)));
+  });
+
   test('readme_nfo_example_matches_the_code', () {
     expect(block('nfo'), exampleNfo().toString());
   });
@@ -215,7 +222,8 @@ void main() {
   });
 
   test('readme_lists_the_file_types', () {
-    final source = File('lib/screens/home_screen.dart').readAsStringSync();
+    // The audio types are the first list in the shared file dialogs.
+    final source = File('lib/screens/pick_files.dart').readAsStringSync();
     final list = RegExp(r"extensions:\s*\[([^\]]+)\]")
         .firstMatch(source)!
         .group(1)!;

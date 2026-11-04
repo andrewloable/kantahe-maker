@@ -390,6 +390,40 @@ void main() {
       .where((n) => n.contains('.part.') || n.endsWith('.part'))
       .toList();
 
+  group('mixStems', () {
+    test('mix_stems_args', () {
+      expect(mixStemsArgs('i.mp3', 'v.mp3', 'o.mp3'), [
+        '-y', '-i', 'i.mp3', '-i', 'v.mp3',
+        '-filter_complex', '[0:a][1:a]amix=inputs=2:duration=longest:normalize=0[a]',
+        '-map', '[a]', '-c:a', 'libmp3lame', '-q:a', '2', '-ar', '44100', '-ac', '2',
+        '-f', 'mp3', 'o.mp3',
+      ]);
+    });
+
+    late Directory tmp;
+    setUp(() => tmp = Directory.systemTemp.createTempSync('pipe_mix'));
+    tearDown(() => tmp.deleteSync(recursive: true));
+
+    test('make_source_from_stems_with_real_ffmpeg', () async {
+      ff(['-f', 'lavfi', '-i', 'sine=frequency=330:duration=2', '-ac', '2', '-c:a', 'libmp3lame', '-b:a', '96k', '${tmp.path}/instrumental.mp3']);
+      ff(['-f', 'lavfi', '-i', 'sine=frequency=550:duration=2', '-ac', '1', '-c:a', 'libmp3lame', '-b:a', '48k', '${tmp.path}/vocals.mp3']);
+      await makeSourceFromStems(realTools(), tmp);
+      expect(File('${tmp.path}/source.mp3').existsSync(), isTrue);
+      expect(probe('${tmp.path}/source.mp3', 'stream=codec_name,channels,sample_rate'), 'mp3,44100,2');
+      final d = await durationSeconds(realTools(), '${tmp.path}/source.mp3');
+      expect(d, inInclusiveRange(1.9, 2.2));
+      expect(leftovers(tmp), isEmpty);
+    }, skip: noFfmpeg);
+
+    test('make_source_from_stems_failure_leaves_nothing', () async {
+      ff(['-f', 'lavfi', '-i', 'sine=frequency=330:duration=1', '-c:a', 'libmp3lame', '${tmp.path}/instrumental.mp3']);
+      // vocals.mp3 is missing.
+      await expectLater(makeSourceFromStems(realTools(), tmp), throwsA(anything));
+      expect(File('${tmp.path}/source.mp3').existsSync(), isFalse);
+      expect(leftovers(tmp), isEmpty);
+    }, skip: noFfmpeg);
+  });
+
   group('readTags', () {
     late Directory tmp;
     setUp(() => tmp = Directory.systemTemp.createTempSync('pipe_tags'));

@@ -74,6 +74,10 @@ String buildLrc({
   return b.toString();
 }
 
+/// The "Lyric timing" values of songs timed by the AI (see Nfo and the README).
+const lyricTimingAi = 'automatic: words timed by Deepgram Nova-3 on Cloudflare Workers AI';
+const lyricTimingAiTapped = '$lyricTimingAi, corrected by hand in Kantahe Maker';
+
 /// The song info stored as NAME.nfo: aligned "Key : value" lines.
 class Nfo {
   final String title, artist, composer, lyricist, audio, separator, lyricTiming;
@@ -83,6 +87,9 @@ class Nfo {
   final String instrumental, vocals, vocalsAudio;
   final int? number;
   final int seconds, lyricLines;
+
+  /// True when at least one lyric line has word marks (the row says "word", else "line").
+  final bool wordTiming;
 
   const Nfo({
     required this.title,
@@ -98,6 +105,7 @@ class Nfo {
     this.vocalsAudio = '',
     required this.lyricLines,
     this.lyricTiming = 'tapped by hand in Kantahe Maker',
+    this.wordTiming = false,
   });
 
   /// Rows with an empty value are left out. Keys are padded to the longest key
@@ -118,6 +126,7 @@ class Nfo {
       ('Vocals audio', vocalsAudio),
       ('Lyrics', 'timed (.lrc, $lyricLines lines)'),
       ('Lyric timing', lyricTiming),
+      ('Timing by', wordTiming ? 'word' : 'line'),
     ];
     final width = rows.map((r) => r.$1.length).reduce((a, b) => a > b ? a : b);
     final b = StringBuffer();

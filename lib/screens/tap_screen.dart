@@ -49,8 +49,15 @@ abstract class TapPlayer {
   Future<void> pause();
   Future<void> seek(Duration position);
   Future<void> setRate(double rate);
+
+  /// Sets the volume: [volume] from 0 (silent) to 1 (full).
+  Future<void> setVolume(double volume);
   Future<void> dispose();
 }
+
+/// media_kit takes a volume from 0 to 100; the app uses 0 to 1. Out-of-range values are
+/// cut to the range.
+double mediaKitVolume(double volume) => volume.clamp(0.0, 1.0) * 100;
 
 class MediaKitTapPlayer implements TapPlayer {
   MediaKitTapPlayer() : _player = Player();
@@ -83,6 +90,8 @@ class MediaKitTapPlayer implements TapPlayer {
   Future<void> seek(Duration position) => _player.seek(position);
   @override
   Future<void> setRate(double rate) => _player.setRate(rate);
+  @override
+  Future<void> setVolume(double volume) => _player.setVolume(mediaKitVolume(volume));
   @override
   Future<void> dispose() => _player.dispose();
 }
@@ -153,6 +162,11 @@ class _TapScreenState extends State<TapScreen> {
   // Word timing: Space times the next word of [_wordLine] instead of the next line.
   bool _wordMode = false;
   int _wordLine = -1;
+
+  // True right after the selection moved on by itself because a line got all its words, so
+  // that Backspace goes back to that line. A click (or the switch) clears it: Backspace then
+  // belongs to the line the user chose.
+  bool _selectionAdvanced = false;
   double _rate = 1;
   int _lastShownRow = -2;
 
@@ -213,6 +227,7 @@ class _TapScreenState extends State<TapScreen> {
     if ((words == null || !words.contains(null)) &&
         line + 1 < widget.lines.length) {
       _wordLine = line + 1;
+      _selectionAdvanced = true;
     }
   }
 
@@ -220,11 +235,13 @@ class _TapScreenState extends State<TapScreen> {
   /// moved on, so it is the previous line that is taken back.
   void _undoWord() {
     var line = _wordLine;
-    if (line > 0 &&
+    if (_selectionAdvanced &&
+        line > 0 &&
         _session.wordTimes[line] == null &&
         _session.wordTimes[line - 1] != null) {
       line--;
     }
+    _selectionAdvanced = false;
     if (line < 0) return;
     _wordLine = line;
     _session.undoWord(line);
@@ -243,7 +260,19 @@ class _TapScreenState extends State<TapScreen> {
     return -1;
   }
 
+  /// Takes back all the word taps of the selected line (it keeps its own tap) and goes to its
+  /// start, so it can be timed again at once.
+  void _resetWords() {
+    final line = _wordLine;
+    if (line < 0 || _preview) return;
+    _selectionAdvanced = false;
+    _mutate(() => _session.resetWords(line));
+    final t = _session.times[line];
+    if (t != null) unawaited(_player.seek(_secondsToDuration(t)));
+  }
+
   void _setWordMode(bool on) => setState(() {
+    _selectionAdvanced = false;
     _wordMode = on;
     if (on && _wordLine < 0) _wordLine = _firstLineToWord();
   });
@@ -301,7 +330,10 @@ class _TapScreenState extends State<TapScreen> {
     }
     if (_wordMode) {
       // Word timing only chooses the line: its taps stay.
-      setState(() => _wordLine = i);
+      setState(() {
+        _wordLine = i;
+        _selectionAdvanced = false;
+      });
       final t = _session.times[i];
       if (t != null) unawaited(_player.seek(_secondsToDuration(t)));
       return;
@@ -350,6 +382,54 @@ class _TapScreenState extends State<TapScreen> {
         curve: Curves.easeOut,
       );
     });
+  }
+
+  /// The text of line [i]. In word timing the selected line shows which words are timed (lit)
+  /// and the one being sung, the last timed (underlined); while the song plays, the
+  /// words of the line being sung with a time light up as they are sung. Colour only, so a
+  /// line never reflows. Any other line is plain text.
+  Widget _lineTitle(int i, List<double?>? words, double seconds) {
+    final line = widget.lines[i];
+    final key = ValueKey('line-text-$i');
+    final wordTiming = _wordMode && !_preview;
+    final selected = wordTiming && i == _wordLine && _session.times[i] != null;
+    // In word timing every line with word times shows what was timed; only the selected one
+    // also underlines the current word. Otherwise the line being sung lights up as it plays.
+    final tapped = wordTiming && words != null;
+    final playing = !wordTiming && words != null && i == _session.activeLine(seconds);
+    if (!selected && !tapped && !playing) return Text(line, key: key);
+    final parts = splitWords(line);
+    final marks = [
+      for (final m in wordMarks(
+        wordCount: parts.length,
+        times: words,
+        timing: selected || tapped,
+        position: seconds,
+        offset: _session.offset,
+      ))
+        m == WordMark.current && !selected ? WordMark.lit : m,
+    ];
+    if (marks.every((m) => m == WordMark.plain)) return Text(line, key: key);
+    final scheme = Theme.of(context).colorScheme;
+    return Text.rich(
+      key: key,
+      TextSpan(
+        children: [
+          for (var k = 0; k < parts.length; k++)
+            TextSpan(
+              text: parts[k],
+              style: switch (marks[k]) {
+                WordMark.lit => TextStyle(color: scheme.primary),
+                WordMark.current => TextStyle(
+                  color: scheme.primary,
+                  decoration: TextDecoration.underline,
+                ),
+                WordMark.plain => TextStyle(color: scheme.onSurface),
+              },
+            ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -484,6 +564,21 @@ class _TapScreenState extends State<TapScreen> {
                 value: _wordMode,
                 onChanged: _setWordMode,
               ),
+              if (_wordMode)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: OutlinedButton(
+                      key: const ValueKey('word-reset'),
+                      onPressed:
+                          !_preview && _wordLine >= 0 && wordTimes[_wordLine] != null
+                          ? _resetWords
+                          : null,
+                      child: const Text('Reset the words of this line'),
+                    ),
+                  ),
+                ),
               const Divider(height: 1),
               Expanded(
                 child: widget.lines.isEmpty
@@ -503,7 +598,7 @@ class _TapScreenState extends State<TapScreen> {
                             width: 84,
                             child: Text(stampLabel(times[i]), style: mono),
                           ),
-                          title: Text(widget.lines[i]),
+                          title: _lineTitle(i, wordTimes[i], seconds),
                           trailing: wordTimes[i] == null
                               ? null
                               : Text(

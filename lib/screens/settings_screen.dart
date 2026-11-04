@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import '../ai_timing.dart';
 import '../app_dirs.dart';
 import '../fs_retry.dart';
 import '../settings.dart';
@@ -36,6 +37,7 @@ class SettingsScreen extends StatefulWidget {
     this.saveSettings,
     this.hasGraphicsSupport,
     this.installGraphics,
+    this.verifyCloudflare,
   });
 
   final Future<Map<String, String?>> Function()? status;
@@ -54,32 +56,99 @@ class SettingsScreen extends StatefulWidget {
   /// Downloads the graphics card support (asking first); true when it is installed.
   final Future<bool> Function(BuildContext context)? installGraphics;
 
+  /// Tests an account ID and token with Cloudflare, throwing why not; null means the real test.
+  final Future<void> Function(String accountId, String token)? verifyCloudflare;
+
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
   late Future<Map<String, String?>> _status = _loadStatus();
-  bool _useGraphicsCard = false;
+  AppSettings _settings = const AppSettings();
+  final _account = TextEditingController();
+  final _token = TextEditingController();
+  String _cfStatus = '';
+  bool _cfBusy = false;
 
   @override
   void initState() {
     super.initState();
-    unawaited(_loadGraphicsCard());
+    unawaited(_loadSettings());
   }
+
+  @override
+  void dispose() {
+    _account.dispose();
+    _token.dispose();
+    super.dispose();
+  }
+
+  bool get _useGraphicsCard => _settings.useGraphicsCard;
 
   bool get _showGraphicsCard =>
       widget.showGraphicsCard ?? parseHost(Platform.version).$1 == HostOs.windows;
 
-  Future<void> _loadGraphicsCard() async {
-    if (!_showGraphicsCard) return;
+  Future<void> _loadSettings() async {
     try {
       final settings = await (widget.loadSettings ?? _defaultLoadSettings)();
-      if (mounted) setState(() => _useGraphicsCard = settings.useGraphicsCard);
+      if (!mounted) return;
+      setState(() => _settings = settings);
+      _account.text = settings.cloudflareAccountId;
+      _token.text = settings.cloudflareToken;
     } catch (_) {
-      // The switch stays off.
+      // The defaults stay.
     }
   }
+
+  /// Saves the two values, then tests them with Cloudflare and saves the result: the AI
+  /// button of the Timing step appears only when the test passed for exactly these values.
+  Future<void> _saveCloudflare() async {
+    final save = widget.saveSettings ?? _defaultSaveSettings;
+    var next = _settings.copyWith(
+      cloudflareAccountId: _account.text.trim(),
+      cloudflareToken: _token.text.trim(),
+      cloudflareVerified: false,
+    );
+    setState(() {
+      _cfBusy = true;
+      _cfStatus = next.hasCloudflare ? 'Testing with Cloudflare...' : '';
+    });
+    String status;
+    try {
+      await save(next);
+      if (!next.hasCloudflare) {
+        status = 'Cloudflare AI is off: it needs both the account ID and the API token.';
+      } else {
+        try {
+          await (widget.verifyCloudflare ?? _defaultVerify)(
+            next.cloudflareAccountId,
+            next.cloudflareToken,
+          );
+          next = next.copyWith(cloudflareVerified: true);
+          await save(next);
+          status = 'Saved. Cloudflare AI works: "Auto-time with AI" is now in the Timing step.';
+        } on AiTimingException catch (e) {
+          status = 'Saved, but the test failed: ${e.message} The "Auto-time with AI" button '
+              'stays hidden.';
+        } catch (e) {
+          status = 'Saved, but the test failed: $e The "Auto-time with AI" button stays hidden.';
+        }
+      }
+    } catch (e) {
+      // The token is never part of the message: it comes from the file system.
+      status = 'Could not save: $e';
+    }
+    if (!mounted) return;
+    setState(() {
+      _settings = next;
+      _cfBusy = false;
+      _cfStatus = status;
+    });
+  }
+
+  static Future<void> _defaultVerify(String accountId, String token) =>
+      verifyCloudflare(accountId: accountId, token: token);
 
   static Future<AppSettings> _defaultLoadSettings() async =>
       readSettings(await appSettingsFile());
@@ -99,8 +168,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
         final installed = await (widget.installGraphics ?? showGraphicsCardDialog)(context);
         if (!installed) return;
       }
-      await (widget.saveSettings ?? _defaultSaveSettings)(AppSettings(useGraphicsCard: on));
-      if (mounted) setState(() => _useGraphicsCard = on);
+      final next = _settings.copyWith(useGraphicsCard: on);
+      await (widget.saveSettings ?? _defaultSaveSettings)(next);
+      if (mounted) setState(() => _settings = next);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
@@ -196,6 +266,39 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             const SizedBox(height: 16),
           ],
+          Text('Cloudflare AI (automatic timing)', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 4),
+          const Text('Used by "Auto-time with AI" in the Timing step. Find the account ID on '
+              'the Cloudflare dashboard home page, and make an API token with the "Workers AI" '
+              'permission. The vocals of a song are sent to Cloudflare only after you confirm, '
+              'each time. The token is kept in this computer\'s settings file.'),
+          const SizedBox(height: 8),
+          TextField(
+            key: const ValueKey('cf-account'),
+            controller: _account,
+            decoration: const InputDecoration(labelText: 'Account ID', isDense: true),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            key: const ValueKey('cf-token'),
+            controller: _token,
+            obscureText: true,
+            decoration: const InputDecoration(labelText: 'API token', isDense: true),
+          ),
+          const SizedBox(height: 8),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: FilledButton(
+              key: const ValueKey('cf-save'),
+              onPressed: _cfBusy ? null : _saveCloudflare,
+              child: const Text('Save and test'),
+            ),
+          ),
+          if (_cfStatus.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(_cfStatus, key: const ValueKey('cf-status')),
+          ],
+          const SizedBox(height: 16),
           Text('Tools', style: Theme.of(context).textTheme.titleMedium),
           FutureBuilder<Map<String, String?>>(
             future: _status,
