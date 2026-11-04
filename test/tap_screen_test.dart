@@ -134,6 +134,156 @@ void main() {
     expect(h.changes.last.$1, [12.34, 20.0, null]);
   });
 
+  group('space still stamps after a dialog', () {
+    Future<void> closeDialogWith(WidgetTester tester, String key) async {
+      await tester.tap(find.byKey(ValueKey(key)));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('space_after_cancelling_the_edit_dialog', (tester) async {
+      final h = await pumpScreen(tester, times: [1.0, null, null]);
+      await tester.tap(find.byKey(const ValueKey('edit-times-0')));
+      await tester.pumpAndSettle();
+      await closeDialogWith(tester, 'edit-cancel');
+      h.player.moveTo(const Duration(seconds: 5));
+      await tester.pump();
+      await press(tester, LogicalKeyboardKey.space);
+      expect(h.changes.last.$1, [1.0, 5.0, null]);
+    });
+
+    testWidgets('space_after_a_dialog_opened_with_a_text_field_outside_focused', (tester) async {
+      final h = await pumpWithTextField(tester);
+      await tester.tap(find.byKey(const ValueKey('other')));
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('line-0')));
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('line-0')));
+      await tester.pump();
+      h.player.moveTo(const Duration(seconds: 3));
+      await press(tester, LogicalKeyboardKey.space);
+      expect(h.changes.last.$1.first, 3.0);
+    });
+
+    testWidgets('space_after_the_dialog_is_dismissed_by_tapping_outside', (tester) async {
+      final h = await pumpScreen(tester, times: [1.0, null, null]);
+      await tester.tap(find.byKey(const ValueKey('edit-times-0')));
+      await tester.pumpAndSettle();
+      await tester.tapAt(const Offset(5, 5));
+      await tester.pumpAndSettle();
+      h.player.moveTo(const Duration(seconds: 5));
+      await tester.pump();
+      await press(tester, LogicalKeyboardKey.space);
+      expect(h.changes.last.$1, [1.0, 5.0, null]);
+    });
+
+    testWidgets('space_after_the_dialog_is_opened_twice', (tester) async {
+      final h = await pumpScreen(tester, times: [1.0, null, null]);
+      for (var n = 0; n < 2; n++) {
+        await tester.tap(find.byKey(const ValueKey('edit-times-0')));
+        await tester.pumpAndSettle();
+        await closeDialogWith(tester, 'edit-cancel');
+      }
+      h.player.moveTo(const Duration(seconds: 5));
+      await tester.pump();
+      await press(tester, LogicalKeyboardKey.space);
+      expect(h.changes.last.$1, [1.0, 5.0, null]);
+    });
+
+    testWidgets('control_word_timing_space_without_a_dialog', (tester) async {
+      final h = await pumpScreen(tester, times: [1.0, null, null]);
+      await tester.tap(find.byKey(const ValueKey('word-mode')));
+      await tester.pumpAndSettle();
+      h.player.moveTo(const Duration(seconds: 5));
+      await tester.pump();
+      await press(tester, LogicalKeyboardKey.space);
+      expect(h.wordChanges.last[0], [5.0, null]);
+    });
+
+    testWidgets('space_after_the_dialog_in_word_timing', (tester) async {
+      final h = await pumpScreen(tester, times: [1.0, null, null]);
+      await tester.tap(find.byKey(const ValueKey('word-mode')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('edit-times-0')));
+      await tester.pumpAndSettle();
+      await closeDialogWith(tester, 'edit-cancel');
+      h.player.moveTo(const Duration(seconds: 5));
+      await tester.pump();
+      await press(tester, LogicalKeyboardKey.space);
+      expect(h.wordChanges.last[0], [5.0, null]);
+    });
+
+    testWidgets('space_in_word_timing_moves_on_after_the_dialog_timed_the_selected_line', (tester) async {
+      final h = await pumpScreen(tester, times: [1.0, 4.0, null]);
+      await tester.tap(find.byKey(const ValueKey('word-mode')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('edit-times-0')));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const ValueKey('edit-word-0')), '00:01.00');
+      await tester.enterText(find.byKey(const ValueKey('edit-word-1')), '00:02.50');
+      await closeDialogWith(tester, 'edit-save');
+      h.player.moveTo(const Duration(seconds: 5));
+      await tester.pump();
+      await press(tester, LogicalKeyboardKey.space);
+      expect(h.wordChanges.last[1], [5.0, null]);
+    });
+
+    testWidgets('word_timing_space_on_an_untapped_line_times_the_line_and_its_first_word', (tester) async {
+      final h = await pumpScreen(tester);
+      await tester.tap(find.byKey(const ValueKey('word-mode')));
+      await tester.pumpAndSettle();
+      h.player.moveTo(const Duration(seconds: 5));
+      await press(tester, LogicalKeyboardKey.space);
+      expect(h.changes.last.$1, [5.0, null, null]);
+      expect(h.wordChanges.last[0], [5.0, null]);
+    });
+
+    testWidgets('word_timing_first_word_moves_the_line_time_with_it', (tester) async {
+      final h = await pumpScreen(tester, times: [1.0, 2.0, null]);
+      await tester.tap(find.byKey(const ValueKey('word-mode')));
+      await tester.pumpAndSettle();
+      h.player.moveTo(const Duration(milliseconds: 1300));
+      await press(tester, LogicalKeyboardKey.space);
+      expect(h.changes.last.$1[0], 1.3);
+      expect(h.wordChanges.last[0], [1.3, null]);
+    });
+
+    testWidgets('word_timing_walks_through_untapped_lines', (tester) async {
+      final h = await pumpScreen(tester);
+      await tester.tap(find.byKey(const ValueKey('word-mode')));
+      await tester.pumpAndSettle();
+      for (final sec in [1, 2, 3]) {
+        h.player.moveTo(Duration(seconds: sec));
+        await press(tester, LogicalKeyboardKey.space);
+      }
+      expect(h.changes.last.$1[1], 3.0);
+      expect(h.wordChanges.last[1], [3.0, null]);
+    });
+
+    testWidgets('space_after_saving_the_edit_dialog', (tester) async {
+      final h = await pumpScreen(tester, times: [1.0, null, null]);
+      await tester.tap(find.byKey(const ValueKey('edit-times-0')));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const ValueKey('edit-line-time')), '00:00.50');
+      await closeDialogWith(tester, 'edit-save');
+      h.player.moveTo(const Duration(seconds: 5));
+      await tester.pump();
+      await press(tester, LogicalKeyboardKey.space);
+      expect(h.changes.last.$1, [0.5, 5.0, null]);
+    });
+
+    testWidgets('space_after_the_move_all_dialog', (tester) async {
+      final h = await pumpScreen(tester, times: [1.0, 2.0, null]);
+      await tester.tap(find.byKey(const ValueKey('shift-all')));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const ValueKey('shift-by')), '1');
+      await closeDialogWith(tester, 'shift-apply');
+      h.player.moveTo(const Duration(seconds: 9));
+      await tester.pump();
+      await press(tester, LogicalKeyboardKey.space);
+      expect(h.changes.last.$1, [2.0, 3.0, 9.0]);
+    });
+  });
+
   testWidgets('stamp_reads_the_player_not_a_clock', (tester) async {
     final h = await pumpScreen(tester);
     h.player.position = const Duration(seconds: 7); // no stream event at all
@@ -591,7 +741,7 @@ void main() {
         [1.4, 1.9, 2.3],
         null,
       ]);
-      expect(h.changes, isEmpty, reason: 'the line taps did not change');
+      expect(h.changes.last.$1, [1.4, 2.0], reason: 'the line starts with its first word');
       expect(find.text('3/3 words'), findsOneWidget);
     });
 
@@ -603,7 +753,7 @@ void main() {
       await tapWordAt(tester, h, 1.4);
       await press(tester, LogicalKeyboardKey.backspace);
       expect(h.wordChanges.last, [null, null]);
-      expect(h.changes, isEmpty);
+      expect(h.changes.last.$1, [1.4, 2.0], reason: 'the line keeps its time');
     });
 
     testWidgets('row_click_in_word_mode_keeps_the_line_taps', (tester) async {
@@ -697,13 +847,14 @@ void main() {
       ], reason: 'the line is selected again');
     });
 
-    testWidgets('an_untapped_line_cannot_get_word_times', (tester) async {
+    testWidgets('an_untapped_line_gets_its_line_and_first_word_on_space', (tester) async {
       final h = await wordScreen(tester, times: const [null, null]);
       await wordModeOn(tester);
       await tester.tap(find.byKey(const ValueKey('line-0')));
       await tester.pump();
       await tapWordAt(tester, h, 1.4);
-      expect(h.wordChanges, isEmpty);
+      expect(h.changes.last.$1[0], 1.4);
+      expect(h.wordChanges.last[0], [1.4, null, null]);
       expect(tester.takeException(), isNull);
     });
 
@@ -966,9 +1117,9 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('word-reset')));
       await tester.pump();
       expect(h.wordChanges.last, [null, null]);
-      expect(h.changes, isEmpty, reason: 'the line taps did not change');
+      expect(h.changes.last.$1, [1.4, 2.0], reason: 'the line keeps its time');
       expect(h.player.seeks.length, seeksBefore + 1, reason: 'the reset itself seeks');
-      expect(h.player.seeks.last, const Duration(seconds: 1), reason: 'ready to time it again');
+      expect(h.player.seeks.last, const Duration(milliseconds: 1400), reason: 'ready to time it again');
       expect(find.text('3/3 words'), findsNothing);
       // And the line can be timed again at once.
       await tapWord(tester, h, 1.5);

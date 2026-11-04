@@ -253,7 +253,7 @@ void main() {
     test('word_stamp_first_call_times_the_first_word', () {
       final s = hello()..wordStamp(0, 1.4);
       expect(s.wordTimes[0], [1.4, null, null]);
-      expect(s.times, [1, 2], reason: 'the line tap stays');
+      expect(s.times, [1.4, 2], reason: 'the first word is where the line starts');
       expect(s.wordTimes[1], isNull);
     });
 
@@ -283,7 +283,7 @@ void main() {
       s.undoWord(0);
       s.undoWord(1);
       expect(s.wordTimes, [null, null]);
-      expect(s.times, [1, 2], reason: 'the line taps stay');
+      expect(s.times, [1.4, 2], reason: 'the line keeps the time of its first word');
     });
 
     test('line_changes_clear_the_words_of_the_lines_they_clear', () {

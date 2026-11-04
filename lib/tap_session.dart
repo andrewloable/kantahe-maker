@@ -101,8 +101,10 @@ class TapSession {
     for (final w in _words) w == null ? null : List<double?>.unmodifiable(w),
   ]);
 
-  /// Gives the next untimed word of [line] the time [t]; the first call times the first word.
-  /// Does nothing when every word is timed. Throws StateError if [line] is not tapped.
+  /// Gives the next untimed word of [line] the time [t]; the first call times the first word,
+  /// and the line's time becomes that time. Does nothing when every word is timed. Throws
+  /// StateError if [line] is not tapped, and ArgumentError (changing nothing) if the first word
+  /// would break the order of the lines.
   void wordStamp(int line, double t) {
     RangeError.checkValidIndex(line, _lines);
     if (_times[line] == null) throw StateError('Line $line is not tapped yet');
@@ -110,6 +112,12 @@ class TapSession {
         _words[line] ?? List<double?>.filled(splitWords(_lines[line]).length, null);
     final i = words.indexOf(null);
     if (i < 0) return;
+    if (i == 0) {
+      // The first word is where the line starts: the line's time moves to it. Throws
+      // ArgumentError, and changes nothing, when that would break the order.
+      _checkTimes(line, t, [t]);
+      _times[line] = t;
+    }
     words[i] = t;
     _words[line] = words;
   }
@@ -137,6 +145,16 @@ class TapSession {
         words.length != splitWords(_lines[line]).length) {
       throw ArgumentError('Give one time per word');
     }
+    _checkTimes(line, t, words);
+    _times[line] = t;
+    _words[line] = words == null || words.isEmpty
+        ? null
+        : List<double?>.of(words);
+  }
+
+  /// Throws ArgumentError when [t] for [line] and its [words] would not stay between the
+  /// nearest tapped lines above and below, or the words would not follow each other.
+  void _checkTimes(int line, double t, List<double?>? words) {
     final before = _tappedBefore(line);
     final after = _tappedAfter(line);
     if (before != null && t < _times[before]!) {
@@ -148,6 +166,7 @@ class TapSession {
     final limit = after == null ? null : _times[after];
     double? last;
     for (final w in words ?? const <double>[]) {
+      if (w == null) continue;
       if (w < t) throw ArgumentError('A word is before its line starts');
       if (last != null && w < last) {
         throw ArgumentError('The words are not in order');
@@ -157,10 +176,6 @@ class TapSession {
       }
       last = w;
     }
-    _times[line] = t;
-    _words[line] = words == null || words.isEmpty
-        ? null
-        : List<double?>.of(words);
   }
 
   int? _tappedBefore(int line) {

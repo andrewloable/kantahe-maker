@@ -220,15 +220,39 @@ class _TapScreenState extends State<TapScreen> {
   /// Times the next word of the selected line, then moves to the next line once this
   /// one has all its words.
   void _stampWord() {
-    final line = _wordLine;
-    if (line < 0 || _session.times[line] == null) return;
-    _session.wordStamp(line, _now);
+    var line = _wordLine;
+    // A line whose words are all timed already (for example by the times dialog) is passed
+    // over, so Space keeps working on the next line that still has a word to time.
+    while (line >= 0 && line < widget.lines.length && _allWordsTimed(line)) {
+      line++;
+    }
+    if (line < 0 || line >= widget.lines.length) return;
+    if (_session.times[line] == null) {
+      // An untapped line takes its time and its first word at this press: the line starts
+      // where its first word starts.
+      try {
+        _session.setTimes(line, _now, null);
+      } on ArgumentError {
+        return;
+      }
+    }
+    _wordLine = line;
+    try {
+      _session.wordStamp(line, _now);
+    } on ArgumentError {
+      return;
+    }
     final words = _session.wordTimes[line];
     if ((words == null || !words.contains(null)) &&
         line + 1 < widget.lines.length) {
       _wordLine = line + 1;
       _selectionAdvanced = true;
     }
+  }
+
+  bool _allWordsTimed(int line) {
+    final words = _session.wordTimes[line];
+    return words != null && !words.contains(null);
   }
 
   /// Takes back the last word tap. Right after a line was finished the selection has
@@ -249,13 +273,8 @@ class _TapScreenState extends State<TapScreen> {
 
   /// The first tapped line with more than one word that still lacks word times.
   int _firstLineToWord() {
-    final words = _session.wordTimes;
     for (var i = 0; i < widget.lines.length; i++) {
-      if (_session.times[i] != null &&
-          splitWords(widget.lines[i]).length > 1 &&
-          (words[i] == null || words[i]!.contains(null))) {
-        return i;
-      }
+      if (splitWords(widget.lines[i]).length > 1 && !_allWordsTimed(i)) return i;
     }
     return -1;
   }
@@ -282,7 +301,15 @@ class _TapScreenState extends State<TapScreen> {
         apply: (t, words) => _mutate(() => _session.setTimes(i, t, words)),
       ),
     );
-    if (mounted) _focus.requestFocus();
+    _takeKeys();
+  }
+
+  /// Gives the keyboard back to this screen after a dialog closed. It is done after the next
+  /// frame: the closing dialog gives its focus back to the window only while it is leaving.
+  void _takeKeys() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _focus.requestFocus();
+    });
   }
 
   void _setWordMode(bool on) => setState(() {
@@ -318,12 +345,15 @@ class _TapScreenState extends State<TapScreen> {
   }
 
   /// Asks for a number of seconds and moves every tapped time by it (see _ShiftAllDialog).
-  Future<void> _shiftAll() => showDialog<void>(
-    context: context,
-    builder: (context) => _ShiftAllDialog(
-      apply: (delta) => _mutate(() => _session.shiftBy(delta)),
-    ),
-  );
+  Future<void> _shiftAll() async {
+    await showDialog<void>(
+      context: context,
+      builder: (context) => _ShiftAllDialog(
+        apply: (delta) => _mutate(() => _session.shiftBy(delta)),
+      ),
+    );
+    _takeKeys();
+  }
 
   /// Makes the first line start now and moves every other tapped line along with it.
   void _shiftToNow() {
