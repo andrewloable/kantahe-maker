@@ -42,6 +42,19 @@ String stamp(double seconds) {
   return '$minutes:$secs';
 }
 
+final _stampText = RegExp(r'^\s*(?:(\d{1,3}):)?(\d{1,3}(?:\.\d+)?)\s*$');
+
+/// The seconds of a time typed as "mm:ss.xx" (also "m:ss", "ss.xx" or "ss"), or null when
+/// the text is not a time. Seconds of 60 or more are refused when minutes are given.
+double? parseStamp(String text) {
+  final m = _stampText.firstMatch(text);
+  if (m == null) return null;
+  final secs = double.parse(m.group(2)!);
+  if (m.group(1) == null) return secs;
+  if (secs >= 60) return null;
+  return int.parse(m.group(1)!) * 60 + secs;
+}
+
 /// One lyric line. An empty [words] list means line-only timing, otherwise [text]
 /// is ignored and each word carries its own time.
 class LrcLine {

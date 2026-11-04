@@ -276,6 +276,28 @@ void main() {
       expect(File(path).existsSync(), isFalse);
     });
   });
+  group('parseStamp', () {
+    test('parses_mm_ss_xx', () {
+      expect(parseStamp('01:23.45'), 83.45);
+      expect(parseStamp('1:02'), 62);
+      expect(parseStamp('12.5'), 12.5);
+      expect(parseStamp(' 00:00.00 '), 0);
+    });
+
+    test('rejects_bad_text', () {
+      expect(parseStamp(''), isNull);
+      expect(parseStamp('abc'), isNull);
+      expect(parseStamp('01:75.00'), isNull);
+      expect(parseStamp('1:2:3'), isNull);
+    });
+
+    test('round_trip_with_stamp', () {
+      for (final t in [0.0, 1.5, 83.45, 600.25]) {
+        expect(parseStamp(stamp(t)), t);
+      }
+    });
+  });
+
 }
 
 /// The index of [pattern] in [bytes] at or after [from], or -1.

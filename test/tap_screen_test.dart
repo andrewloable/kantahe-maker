@@ -1074,4 +1074,186 @@ void main() {
       expect(h.wordChanges.last, [null, null]);
     });
   });
+
+  group('enter the times by hand', () {
+    final times = <double?>[1.0, 4.0, 8.0];
+    final words = <List<double?>?>[
+      [1.0, 2.5],
+      [4.0, 5.0],
+      [8.0, 9.0],
+    ];
+
+    Future<void> openEditor(WidgetTester tester, int line) async {
+      await tester.tap(find.byKey(ValueKey('edit-times-$line')));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('edit_dialog_shows_the_times', (tester) async {
+      await pumpScreen(tester, times: times, wordTimes: words);
+      await openEditor(tester, 0);
+      expect(find.byKey(const ValueKey('edit-line-time')), findsOneWidget);
+      expect(
+        tester.widget<TextField>(find.byKey(const ValueKey('edit-line-time'))).controller!.text,
+        '00:01.00',
+      );
+      expect(
+        tester.widget<TextField>(find.byKey(const ValueKey('edit-word-1'))).controller!.text,
+        '00:02.50',
+      );
+    });
+
+    testWidgets('saving_a_word_time_changes_it', (tester) async {
+      final h = await pumpScreen(tester, times: times, wordTimes: words);
+      await openEditor(tester, 0);
+      await tester.enterText(find.byKey(const ValueKey('edit-word-1')), '00:02.00');
+      await tester.tap(find.byKey(const ValueKey('edit-save')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('edit-save')), findsNothing);
+      expect(h.wordChanges.last[0], [1.0, 2.0]);
+      expect(h.changes, isEmpty);
+    });
+
+    testWidgets('a_word_before_the_line_start_is_refused', (tester) async {
+      final h = await pumpScreen(tester, times: times, wordTimes: words);
+      await openEditor(tester, 0);
+      await tester.enterText(find.byKey(const ValueKey('edit-word-0')), '00:00.50');
+      await tester.tap(find.byKey(const ValueKey('edit-save')));
+      await tester.pumpAndSettle();
+      expect(find.text('A word is before its line starts'), findsOneWidget);
+      expect(h.wordChanges, isEmpty);
+    });
+
+    testWidgets('moving_the_line_leaves_the_word_fields', (tester) async {
+      await pumpScreen(tester, times: times, wordTimes: words);
+      await openEditor(tester, 0);
+      await tester.enterText(find.byKey(const ValueKey('edit-line-time')), '00:02.00');
+      await tester.pump();
+      expect(
+        tester.widget<TextField>(find.byKey(const ValueKey('edit-word-0'))).controller!.text,
+        '00:01.00',
+      );
+      expect(
+        tester.widget<TextField>(find.byKey(const ValueKey('edit-word-1'))).controller!.text,
+        '00:02.50',
+      );
+    });
+
+    testWidgets('changing_only_the_line_leaves_the_words_alone', (tester) async {
+      final h = await pumpScreen(tester, times: times, wordTimes: words);
+      await openEditor(tester, 0);
+      await tester.enterText(find.byKey(const ValueKey('edit-line-time')), '00:00.50');
+      await tester.tap(find.byKey(const ValueKey('edit-save')));
+      await tester.pumpAndSettle();
+      expect(h.changes.last.$1[0], 0.5);
+      expect(h.wordChanges, isEmpty);
+    });
+
+    testWidgets('a_line_after_its_first_word_is_refused', (tester) async {
+      final h = await pumpScreen(tester, times: times, wordTimes: words);
+      await openEditor(tester, 0);
+      await tester.enterText(find.byKey(const ValueKey('edit-line-time')), '00:01.50');
+      await tester.tap(find.byKey(const ValueKey('edit-save')));
+      await tester.pumpAndSettle();
+      expect(find.text('A word is before its line starts'), findsOneWidget);
+      expect(h.changes, isEmpty);
+    });
+
+    testWidgets('out_of_order_shows_an_error_and_changes_nothing', (tester) async {
+      final h = await pumpScreen(tester, times: times, wordTimes: words);
+      await openEditor(tester, 1);
+      await tester.enterText(find.byKey(const ValueKey('edit-line-time')), '00:09.00');
+      await tester.tap(find.byKey(const ValueKey('edit-save')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('edit-error')), findsOneWidget);
+      expect(find.byKey(const ValueKey('edit-save')), findsOneWidget);
+      expect(h.changes, isEmpty);
+      expect(h.wordChanges, isEmpty);
+    });
+
+    testWidgets('partly_filled_words_are_refused', (tester) async {
+      final h = await pumpScreen(tester, times: times, wordTimes: words);
+      await openEditor(tester, 0);
+      await tester.enterText(find.byKey(const ValueKey('edit-word-0')), '');
+      await tester.tap(find.byKey(const ValueKey('edit-save')));
+      await tester.pumpAndSettle();
+      expect(
+        find.text(
+          'Fill in every word, or clear them all to time the line as a whole',
+        ),
+        findsOneWidget,
+      );
+      expect(h.wordChanges, isEmpty);
+    });
+
+    testWidgets('no_change_closes_without_a_change', (tester) async {
+      final h = await pumpScreen(tester, times: times, wordTimes: words);
+      await openEditor(tester, 0);
+      await tester.tap(find.byKey(const ValueKey('edit-save')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('edit-save')), findsNothing);
+      expect(h.changes, isEmpty);
+      expect(h.wordChanges, isEmpty);
+    });
+
+    testWidgets('edit_is_off_while_previewing', (tester) async {
+      await pumpScreen(tester, times: times, wordTimes: words);
+      await tester.tap(find.byKey(const ValueKey('preview')));
+      await tester.pumpAndSettle();
+      final button = tester.widget<IconButton>(find.byKey(const ValueKey('edit-times-0')));
+      expect(button.onPressed, isNull);
+    });
+  });
+
+  group('shift all by a number of seconds', () {
+    final times = <double?>[1.0, 4.0, 8.0];
+    final words = <List<double?>?>[
+      [1.0, 2.5],
+      [4.0, 5.0],
+      [8.0, 9.0],
+    ];
+
+    Future<void> shiftBy(WidgetTester tester, String text) async {
+      await tester.tap(find.byKey(const ValueKey('shift-all')));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const ValueKey('shift-by')), text);
+      await tester.tap(find.byKey(const ValueKey('shift-apply')));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('shift_all_moves_every_time', (tester) async {
+      final h = await pumpScreen(tester, times: times, wordTimes: words);
+      await shiftBy(tester, '-1');
+      expect(find.byKey(const ValueKey('shift-apply')), findsNothing);
+      expect(h.changes.last.$1, [0.0, 3.0, 7.0]);
+      expect(h.wordChanges.last[0], [0.0, 1.5]);
+    });
+
+    testWidgets('shift_all_below_zero_shows_error', (tester) async {
+      final h = await pumpScreen(
+        tester,
+        times: const [0.5, 4.0, 8.0],
+        wordTimes: words,
+      );
+      await shiftBy(tester, '-1');
+      expect(find.byKey(const ValueKey('shift-error')), findsOneWidget);
+      expect(h.changes, isEmpty);
+    });
+
+    testWidgets('shift_all_refuses_text_that_is_not_a_number', (tester) async {
+      await pumpScreen(tester, times: times, wordTimes: words);
+      await shiftBy(tester, 'abc');
+      expect(
+        find.text('Type the seconds, e.g. -1 or 0.5'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('shift_all_is_off_while_previewing', (tester) async {
+      await pumpScreen(tester, times: times, wordTimes: words);
+      await tester.tap(find.byKey(const ValueKey('preview')));
+      await tester.pumpAndSettle();
+      final button = tester.widget<IconButton>(find.byKey(const ValueKey('shift-all')));
+      expect(button.onPressed, isNull);
+    });
+  });
 }

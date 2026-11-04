@@ -125,6 +125,58 @@ class TapSession {
     if (i <= 0) _words[line] = null;
   }
 
+  /// Sets the time of [line] to [t] and its word times to [words] (null or empty: line-only
+  /// timing), both at once. Works on untapped lines too. Throws ArgumentError, and changes
+  /// nothing, when the time is negative, the word count is wrong, or the times would not
+  /// stay in order with the nearest tapped lines above and below.
+  void setTimes(int line, double t, List<double>? words) {
+    RangeError.checkValidIndex(line, _lines);
+    if (!t.isFinite || t < 0) throw ArgumentError('A time cannot be negative');
+    if (words != null &&
+        words.isNotEmpty &&
+        words.length != splitWords(_lines[line]).length) {
+      throw ArgumentError('Give one time per word');
+    }
+    final before = _tappedBefore(line);
+    final after = _tappedAfter(line);
+    if (before != null && t < _times[before]!) {
+      throw ArgumentError('The line starts before the line above it');
+    }
+    if (after != null && t > _times[after]!) {
+      throw ArgumentError('The line starts after the line below it');
+    }
+    final limit = after == null ? null : _times[after];
+    double? last;
+    for (final w in words ?? const <double>[]) {
+      if (w < t) throw ArgumentError('A word is before its line starts');
+      if (last != null && w < last) {
+        throw ArgumentError('The words are not in order');
+      }
+      if (limit != null && w > limit) {
+        throw ArgumentError('A word is after the line below starts');
+      }
+      last = w;
+    }
+    _times[line] = t;
+    _words[line] = words == null || words.isEmpty
+        ? null
+        : List<double?>.of(words);
+  }
+
+  int? _tappedBefore(int line) {
+    for (var j = line - 1; j >= 0; j--) {
+      if (_times[j] != null) return j;
+    }
+    return null;
+  }
+
+  int? _tappedAfter(int line) {
+    for (var j = line + 1; j < _times.length; j++) {
+      if (_times[j] != null) return j;
+    }
+    return null;
+  }
+
   /// Takes back all the word taps of [line]; it goes back to line-only timing (the line's own
   /// time stays).
   void resetWords(int line) {
@@ -170,6 +222,30 @@ class TapSession {
         for (var j = 0; j < w.length; j++) {
           final x = w[j];
           if (x != null) w[j] = move(x);
+        }
+      }
+    }
+  }
+
+  /// Adds [delta] seconds (negative: earlier) to every tapped line and word, so the gaps stay.
+  /// Throws ArgumentError, and changes nothing, when [delta] is not a number or a time would
+  /// go below 0:00. Untapped lines stay untapped.
+  void shiftBy(double delta) {
+    if (!delta.isFinite) throw ArgumentError('Type the seconds, e.g. -1 or 0.5');
+    // A word is never before its line, so checking the lines and the words is the same.
+    for (final v in _times) {
+      if (v != null && v + delta < 0) {
+        throw ArgumentError('Moving by ${delta}s would put a time before 0:00');
+      }
+    }
+    for (var i = 0; i < _times.length; i++) {
+      final v = _times[i];
+      if (v != null) _times[i] = v + delta;
+      final w = _words[i];
+      if (w != null) {
+        for (var j = 0; j < w.length; j++) {
+          final x = w[j];
+          if (x != null) w[j] = x + delta;
         }
       }
     }

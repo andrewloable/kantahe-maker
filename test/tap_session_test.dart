@@ -512,4 +512,98 @@ void main() {
       expect(() => twoLines().resetWords(5), throwsRangeError);
     });
   });
+
+  group('setTimes', () {
+    test('sets_line_and_words', () {
+      final s = TapSession(['la la', 'na'], times: [1.0, 2.0]);
+      s.setTimes(0, 1.5, [1.5, 1.8]);
+      expect(s.times[0], 1.5);
+      expect(s.wordTimes[0], [1.5, 1.8]);
+    });
+
+    test('null_words_makes_the_line_line_only', () {
+      final s = TapSession(['la la', 'na'], times: [1.0, 2.0]);
+      s.setTimes(0, 1.5, [1.5, 1.8]);
+      s.setTimes(0, 1.0, null);
+      expect(s.times[0], 1.0);
+      expect(s.wordTimes[0], isNull);
+    });
+
+    test('line_before_the_line_above_throws', () {
+      final s = TapSession(['a', 'b', 'c'], times: [1.0, 2.0, null]);
+      expect(() => s.setTimes(1, 0.5, null), throwsArgumentError);
+      expect(s.times, [1.0, 2.0, null]);
+    });
+
+    test('line_after_the_line_below_throws', () {
+      final s = TapSession(['a', 'b', 'c'], times: [1.0, null, 3.0]);
+      expect(() => s.setTimes(1, 3.5, null), throwsArgumentError);
+      expect(s.times, [1.0, null, 3.0]);
+    });
+
+    test('word_before_line_start_throws', () {
+      final s = TapSession(['la la', 'na'], times: [1.0, 2.0]);
+      expect(() => s.setTimes(0, 1.0, [0.9, 1.2]), throwsArgumentError);
+    });
+
+    test('word_out_of_order_throws', () {
+      final s = TapSession(['la la', 'na'], times: [1.0, 2.0]);
+      expect(() => s.setTimes(0, 1.0, [1.5, 1.2]), throwsArgumentError);
+    });
+
+    test('word_after_the_next_line_throws', () {
+      final s = TapSession(['la la', 'na'], times: [1.0, 2.0]);
+      expect(() => s.setTimes(0, 1.0, [1.5, 2.5]), throwsArgumentError);
+    });
+
+    test('wrong_word_count_throws', () {
+      final s = TapSession(['la la la', 'na'], times: [1.0, 2.0]);
+      expect(() => s.setTimes(0, 1.0, [1.0, 1.2]), throwsArgumentError);
+    });
+
+    test('negative_time_throws', () {
+      final s = TapSession(['la', 'na'], times: [1.0, 2.0]);
+      expect(() => s.setTimes(0, -1, null), throwsArgumentError);
+      expect(s.times[0], 1.0);
+    });
+
+    test('untapped_line_can_be_set', () {
+      final s = TapSession(['la', 'na'], times: [null, null]);
+      s.setTimes(1, 2.0, null);
+      expect(s.times, [null, 2.0]);
+    });
+  });
+
+  group('shiftBy', () {
+    TapSession timed() => TapSession(['la la', 'na'], times: [1.0, 2.0])
+      ..setTimes(0, 1.0, [1.0, 1.5]);
+
+    test('moves_every_line_and_word', () {
+      final s = timed()..shiftBy(-0.5);
+      expect(s.times, [0.5, 1.5]);
+      expect(s.wordTimes[0], [0.5, 1.0]);
+    });
+
+    test('positive_shift_moves_later', () {
+      final s = timed()..shiftBy(1.25);
+      expect(s.times, [2.25, 3.25]);
+      expect(s.wordTimes[0], [2.25, 2.75]);
+    });
+
+    test('untapped_lines_stay_untapped', () {
+      final s = TapSession(['a', 'b'], times: [1.0, null])..shiftBy(1);
+      expect(s.times, [2.0, null]);
+    });
+
+    test('below_zero_throws_and_changes_nothing', () {
+      final s = TapSession(['a', 'b'], times: [0.5, 2.0]);
+      expect(() => s.shiftBy(-1), throwsArgumentError);
+      expect(s.times, [0.5, 2.0]);
+    });
+
+    test('non_finite_throws', () {
+      final s = TapSession(['a'], times: [1.0]);
+      expect(() => s.shiftBy(double.nan), throwsArgumentError);
+    });
+  });
 }

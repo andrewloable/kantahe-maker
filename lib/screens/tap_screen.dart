@@ -271,6 +271,20 @@ class _TapScreenState extends State<TapScreen> {
     if (t != null) unawaited(_player.seek(_secondsToDuration(t)));
   }
 
+  /// Dialog to type the time of line [i] and of each of its words (see _TimesDialog).
+  Future<void> _editTimes(int i) async {
+    await showDialog<void>(
+      context: context,
+      builder: (context) => _TimesDialog(
+        parts: splitWords(widget.lines[i]),
+        lineTime: _session.times[i],
+        wordTimes: _session.wordTimes[i],
+        apply: (t, words) => _mutate(() => _session.setTimes(i, t, words)),
+      ),
+    );
+    if (mounted) _focus.requestFocus();
+  }
+
   void _setWordMode(bool on) => setState(() {
     _selectionAdvanced = false;
     _wordMode = on;
@@ -302,6 +316,14 @@ class _TapScreenState extends State<TapScreen> {
     }
     return KeyEventResult.handled;
   }
+
+  /// Asks for a number of seconds and moves every tapped time by it (see _ShiftAllDialog).
+  Future<void> _shiftAll() => showDialog<void>(
+    context: context,
+    builder: (context) => _ShiftAllDialog(
+      apply: (delta) => _mutate(() => _session.shiftBy(delta)),
+    ),
+  );
 
   /// Makes the first line start now and moves every other tapped line along with it.
   void _shiftToNow() {
@@ -494,6 +516,15 @@ class _TapScreenState extends State<TapScreen> {
                           : _shiftToNow,
                       icon: const Icon(Icons.vertical_align_top),
                     ),
+                    const SizedBox(width: 8),
+                    IconButton.outlined(
+                      key: const ValueKey('shift-all'),
+                      tooltip: 'Move all times by a number of seconds',
+                      onPressed: _preview || times.every((t) => t == null)
+                          ? null
+                          : _shiftAll,
+                      icon: const Icon(Icons.swap_vert),
+                    ),
                   ],
                 ),
               ),
@@ -599,12 +630,22 @@ class _TapScreenState extends State<TapScreen> {
                             child: Text(stampLabel(times[i]), style: mono),
                           ),
                           title: _lineTitle(i, wordTimes[i], seconds),
-                          trailing: wordTimes[i] == null
-                              ? null
-                              : Text(
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (wordTimes[i] != null)
+                                Text(
                                   '${wordTimes[i]!.where((t) => t != null).length}/'
                                   '${wordTimes[i]!.length} words',
                                 ),
+                              IconButton(
+                                key: ValueKey('edit-times-$i'),
+                                tooltip: 'Enter the times',
+                                onPressed: _preview ? null : () => _editTimes(i),
+                                icon: const Icon(Icons.edit_outlined),
+                              ),
+                            ],
+                          ),
                           onTap: () => _onRowTap(i),
                         ),
                       ),
@@ -613,6 +654,232 @@ class _TapScreenState extends State<TapScreen> {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Types the time of a line (mm:ss.xx) and of each of its words. [apply] sets them and throws
+/// ArgumentError when they would break the order; the dialog then stays open with the reason.
+/// Moving only the line moves its words along with it.
+class _TimesDialog extends StatefulWidget {
+  const _TimesDialog({
+    required this.parts,
+    required this.lineTime,
+    required this.wordTimes,
+    required this.apply,
+  });
+
+  final List<String> parts;
+  final double? lineTime;
+  final List<double?>? wordTimes;
+  final void Function(double t, List<double>? words) apply;
+
+  @override
+  State<_TimesDialog> createState() => _TimesDialogState();
+}
+
+class _TimesDialogState extends State<_TimesDialog> {
+  late final bool _hasWords = widget.parts.length > 1;
+  late final String _lineText = widget.lineTime == null
+      ? ''
+      : stampLabel(widget.lineTime);
+  late final List<String> _wordText = [
+    for (var k = 0; k < widget.parts.length; k++)
+      widget.wordTimes == null || widget.wordTimes![k] == null
+          ? ''
+          : stampLabel(widget.wordTimes![k]),
+  ];
+  late final _lineCtrl = TextEditingController(text: _lineText);
+  late final _wordCtrls = [
+    for (final t in _wordText) TextEditingController(text: t),
+  ];
+  String? _error;
+
+  @override
+  void dispose() {
+    _lineCtrl.dispose();
+    for (final c in _wordCtrls) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  void _fail(String message) => setState(() => _error = message);
+
+  void _save() {
+    final typedLine = karmp3.parseStamp(_lineCtrl.text);
+    if (typedLine == null) return _fail('Type the line time as mm:ss.xx');
+    final filled = [for (final c in _wordCtrls) c.text.trim().isNotEmpty];
+    final anyWord = _hasWords && filled.contains(true);
+    if (anyWord && !filled.every((f) => f)) {
+      return _fail(
+        'Fill in every word, or clear them all to time the line as a whole',
+      );
+    }
+    final typedWords = [for (final c in _wordCtrls) karmp3.parseStamp(c.text)];
+    if (anyWord && typedWords.contains(null)) {
+      return _fail('Type each word time as mm:ss.xx');
+    }
+    final lineChanged = _lineCtrl.text != _lineText;
+    final wordsChanged = [
+      for (var k = 0; k < _wordCtrls.length; k++)
+        _wordCtrls[k].text != _wordText[k],
+    ].contains(true);
+    if (!lineChanged && !wordsChanged) return Navigator.pop(context);
+    // Words that were not edited keep their exact times; the line never moves them.
+    final List<double>? words = !anyWord
+        ? null
+        : !wordsChanged && widget.wordTimes != null
+        ? [for (final w in widget.wordTimes!) w!]
+        : [for (final t in typedWords) t!];
+    try {
+      widget.apply(typedLine, words);
+    } on ArgumentError catch (e) {
+      return _fail('${e.message}');
+    }
+    Navigator.pop(context);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Enter the times'),
+      content: SizedBox(
+        width: 360,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              TextField(
+                key: const ValueKey('edit-line-time'),
+                controller: _lineCtrl,
+                autofocus: true,
+                decoration: const InputDecoration(
+                  labelText: 'Line starts at (mm:ss.xx)',
+                ),
+              ),
+              if (_hasWords) ...[
+                const SizedBox(height: 12),
+                for (var k = 0; k < widget.parts.length; k++)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: TextField(
+                      key: ValueKey('edit-word-$k'),
+                      controller: _wordCtrls[k],
+                      decoration: InputDecoration(
+                        labelText: widget.parts[k].trim(),
+                      ),
+                    ),
+                  ),
+              ],
+              if (_error != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(
+                    _error!,
+                    key: const ValueKey('edit-error'),
+                    style: TextStyle(color: Theme.of(context).colorScheme.error),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          key: const ValueKey('edit-cancel'),
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          key: const ValueKey('edit-save'),
+          onPressed: _save,
+          child: const Text('Save'),
+        ),
+      ],
+    );
+  }
+}
+
+/// Types a number of seconds to move every tapped time by (negative: earlier). [apply] throws
+/// ArgumentError when a time would go below 0:00; the dialog then stays open with the reason.
+class _ShiftAllDialog extends StatefulWidget {
+  const _ShiftAllDialog({required this.apply});
+
+  final void Function(double delta) apply;
+
+  @override
+  State<_ShiftAllDialog> createState() => _ShiftAllDialogState();
+}
+
+class _ShiftAllDialogState extends State<_ShiftAllDialog> {
+  final _ctrl = TextEditingController();
+  String? _error;
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  void _fail(String message) => setState(() => _error = message);
+
+  void _apply() {
+    final text = _ctrl.text.trim().replaceFirst('+', '');
+    final delta = double.tryParse(text);
+    if (delta == null) return _fail('Type the seconds, e.g. -1 or 0.5');
+    if (delta == 0) return Navigator.pop(context);
+    try {
+      widget.apply(delta);
+    } on ArgumentError catch (e) {
+      return _fail('${e.message}');
+    }
+    Navigator.pop(context);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Move all times'),
+      content: SizedBox(
+        width: 360,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            TextField(
+              key: const ValueKey('shift-by'),
+              controller: _ctrl,
+              autofocus: true,
+              decoration: const InputDecoration(
+                labelText: 'Seconds to add (negative moves earlier, e.g. -1)',
+              ),
+            ),
+            if (_error != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  _error!,
+                  key: const ValueKey('shift-error'),
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
+              ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          key: const ValueKey('shift-cancel'),
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          key: const ValueKey('shift-apply'),
+          onPressed: _apply,
+          child: const Text('Apply'),
+        ),
+      ],
     );
   }
 }
