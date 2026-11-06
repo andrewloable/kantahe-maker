@@ -74,7 +74,7 @@ To use it you need a Cloudflare account and two values from it. The Cloudflare d
 
 Good to know:
 
-- Only the vocals are sent (the whole song if the song has no separate vocals), and only after you click **Send and time**, each time.
+- Only the vocals are sent, and only after you click **Send and time**, each time. The button works once vocal splitting has finished.
 - The token is kept in the app's settings file on your computer, readable only by your user account on macOS and Linux. Treat it like a password: do not share it, and do not put it in a bug report. To stop using the feature, clear both fields and click **Save and test**, and delete the token in the Cloudflare dashboard.
 - If the test says Cloudflare refused the request, the Account ID is wrong or the token lacks the Workers AI permissions (Read and Edit). Fix it and click **Save and test** again.
 - The result is only as good as the AI's hearing: songs with loud backing vocals, rap, or a language it knows poorly give weaker times.

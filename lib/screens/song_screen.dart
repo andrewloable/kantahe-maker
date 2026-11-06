@@ -1159,11 +1159,15 @@ class _SongScreenState extends State<SongScreen> {
             ),
             if (_aiReady) ...[
               const SizedBox(width: 12),
-              OutlinedButton.icon(
-                key: const ValueKey('ai-time'),
-                onPressed: _aiBusy ? null : () => unawaited(_autoTime()),
-                icon: const Icon(Icons.auto_awesome),
-                label: const Text('Auto-time with AI'),
+              // Only the vocals are ever sent, so the button waits for vocal splitting.
+              Tooltip(
+                message: _hasVocals ? '' : 'Available when the vocals are split',
+                child: OutlinedButton.icon(
+                  key: const ValueKey('ai-time'),
+                  onPressed: _aiBusy || !_hasVocals ? null : () => unawaited(_autoTime()),
+                  icon: const Icon(Icons.auto_awesome),
+                  label: const Text('Auto-time with AI'),
+                ),
               ),
             ],
           ],
@@ -1214,18 +1218,15 @@ class _SongScreenState extends State<SongScreen> {
       _showMessage('Cloudflare AI is not set up: save and test it in Settings first.');
       return;
     }
-    final vocals = _hasVocals;
+    if (!_hasVocals) return;
     final agreed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         key: const ValueKey('ai-consent'),
         title: const Text('Send the audio to Cloudflare?'),
-        content: Text(
-          vocals
-              ? 'The vocals of this song will be sent to Cloudflare Workers AI (Deepgram Nova-3), '
-                  'which listens to them and says when each word starts.'
-              : 'This song has no separate vocals, so the whole song will be sent to Cloudflare '
-                  'Workers AI (Deepgram Nova-3). It works best with the vocals alone.',
+        content: const Text(
+          'The vocals of this song will be sent to Cloudflare Workers AI (Deepgram Nova-3), '
+          'which listens to them and says when each word starts.',
         ),
         actions: [
           TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
@@ -1241,7 +1242,7 @@ class _SongScreenState extends State<SongScreen> {
     final lines = project.lyricLines();
     setState(() => _aiBusy = true);
     try {
-      final bytes = await File(_file(vocals ? 'vocals.mp3' : 'source.mp3')).readAsBytes();
+      final bytes = await File(_file('vocals.mp3')).readAsBytes();
       final heard = await (widget.aiTranscribeFn ?? _defaultTranscribe)(bytes, settings);
       final first = alignLyrics(lines, heard);
       final missing = findMissingWords(lines, heard);

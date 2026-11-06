@@ -705,7 +705,7 @@ void main() {
       await settle(tester, until: () => s.json()['timingSource'] == 'ai+tapped');
     });
 
-    testWidgets('ai_sends_the_vocals_else_the_song', (tester) async {
+    testWidgets('ai_sends_the_vocals', (tester) async {
       final a = await aiSong(tester);
       await press(tester, 'ai-time');
       await press(tester, 'ai-send');
@@ -713,13 +713,11 @@ void main() {
       expect(a.aiBytes.single, [5, 5], reason: 'vocals.mp3');
     });
 
-    testWidgets('ai_sends_the_song_when_there_are_no_vocals', (tester) async {
-      final a = await aiSong(tester, vocals: false);
-      await press(tester, 'ai-time');
-      expect(find.textContaining('whole song'), findsOneWidget);
-      await press(tester, 'ai-send');
-      await settle(tester, until: () => a.aiBytes.isNotEmpty);
-      expect(a.aiBytes.single, 'x'.codeUnits, reason: 'source.mp3');
+    testWidgets('ai_button_disabled_until_the_vocals_exist', (tester) async {
+      await aiSong(tester, vocals: false);
+      final button = find.byKey(const ValueKey('ai-time'));
+      expect(button, findsOneWidget);
+      expect(tester.widget<ButtonStyleButton>(button).onPressed, isNull);
     });
   });
 
