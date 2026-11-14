@@ -136,8 +136,9 @@ app runs with `dart:io` `Process`. Nothing outside the app is bundled with it.
 - **ffmpeg/ffprobe**: the app first looks for the tools on `PATH` and in `/opt/homebrew/bin`
   and `/usr/local/bin`. Apps started from Finder do not inherit the shell's `PATH`, which is
   why those two folders are checked by name. If the tools are not found, it downloads static
-  builds: BtbN FFmpeg-Builds for Windows and Linux, and Martin Riedl's builds for macOS. The
-  implementing task verifies the exact URLs and checksum files.
+  builds: BtbN FFmpeg-Builds for Windows and Linux (the stable `latest` release, by release
+  line, because BtbN deletes its dated tags after about two weeks), and Martin Riedl's builds for
+  macOS. The implementing task verifies the exact URLs and checksum files.
 - **uv**: downloaded from astral-sh/uv GitHub releases, using the archive that matches the OS
   and CPU, and checked against the `.sha256` file published next to it.
 - **Python, audio-separator and the model**: fetched by uv and audio-separator on first

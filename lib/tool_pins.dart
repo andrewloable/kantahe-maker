@@ -18,9 +18,9 @@ class PinnedDownload {
 /// https://github.com/astral-sh/uv/releases (checked 2026-10-30). MIT or Apache-2.0.
 const uvVersion = '0.13.5';
 
-/// FFmpeg 9.0.2. Windows and Linux: BtbN FFmpeg-Builds, dated tag below, GPL builds
-/// (https://github.com/BtbN/FFmpeg-Builds/releases). macOS: Martin Riedl's release
-/// builds (https://ffmpeg.martin-riedl.de). Checked 2026-10-30.
+/// FFmpeg 9.0.x. Windows and Linux: BtbN FFmpeg-Builds, stable "latest" release of the 9.0
+/// line (see below), GPL builds (https://github.com/BtbN/FFmpeg-Builds/releases). macOS:
+/// Martin Riedl's release builds (https://ffmpeg.martin-riedl.de). Checked 2026-11-14.
 const ffmpegVersion = '9.0.2';
 
 /// Python for audio-separator. uv downloads its own copy of it (--managed-python), so
@@ -44,10 +44,13 @@ const separatorModel = 'UVR-MDX-NET-Inst_HQ_3.onnx';
 const separatorExtraPackages = <String>['audioread'];
 
 const _uv = 'https://github.com/astral-sh/uv/releases/download/$uvVersion';
-const _btbnTag = 'autobuild-2026-10-27-18-38';
-const _btbn = 'https://github.com/BtbN/FFmpeg-Builds/releases/download/$_btbnTag';
+// BtbN deletes its dated "autobuild-..." tags after about two weeks, so a pinned dated tag
+// ends in HTTP 404 (it did on 2026-11-14). The stable "latest" release keeps the same file
+// names, so the FFmpeg 9.0 release line is pinned by the file name and the patch build moves.
+// The SHA-256 is read from the checksum file of the same release at download time.
+const _btbn = 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest';
 const _btbnSums = '$_btbn/checksums.sha256';
-const _btbnName = 'ffmpeg-n9.0.2-36-g6882969ce9';
+const _btbnName = 'ffmpeg-n9.0-latest';
 const _macArm = 'https://ffmpeg.martin-riedl.de/download/macos/arm64/1789931890_9.0.2';
 const _macX64 = 'https://ffmpeg.martin-riedl.de/download/macos/amd64/1789931006_9.0.2';
 

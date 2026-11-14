@@ -59,12 +59,40 @@ void main() {
       expect(v, isNotEmpty);
       expect(v.toLowerCase(), isNot('latest'));
     }
+    // Only BtbN's stable "latest" tag may be used, and only with the release line (n9.0)
+    // in the file name: dated BtbN tags are deleted after about two weeks.
     for (final entry in toolDownloads.entries) {
       for (final d in entry.value) {
-        expect(d.url, isNot(contains('/latest/')), reason: d.url);
-        expect(d.checksumUrl, isNot(contains('/latest/')), reason: d.url);
+        final btbn = d.url.contains('BtbN/FFmpeg-Builds');
+        if (!btbn) {
+          expect(d.url, isNot(contains('/latest/')), reason: d.url);
+          expect(d.checksumUrl, isNot(contains('/latest/')), reason: d.url);
+        } else {
+          expect(d.url, contains('ffmpeg-n9.0-latest-'), reason: d.url);
+        }
       }
     }
+  });
+
+  test('btbn_urls_do_not_use_a_dated_tag', () {
+    for (final entry in toolDownloads.entries) {
+      for (final d in entry.value) {
+        for (final u in [d.url, d.checksumUrl]) {
+          if (u.contains('BtbN/FFmpeg-Builds')) {
+            expect(u, isNot(contains('/autobuild-')), reason: '${entry.key} $u');
+            expect(u, contains('/releases/download/latest/'), reason: u);
+          }
+        }
+      }
+    }
+  });
+
+  test('btbn_archive_names_per_target', () {
+    String archive(String target) => toolDownloads[target]!.first.url.split('/').last;
+    expect(archive('windows-x64'), 'ffmpeg-n9.0-latest-win64-gpl-9.0.zip');
+    expect(archive('windows-arm64'), 'ffmpeg-n9.0-latest-winarm64-gpl-9.0.zip');
+    expect(archive('linux-x64'), 'ffmpeg-n9.0-latest-linux64-gpl-9.0.tar.xz');
+    expect(archive('linux-arm64'), 'ffmpeg-n9.0-latest-linuxarm64-gpl-9.0.tar.xz');
   });
 
   test('licenses_and_sizes', () {
