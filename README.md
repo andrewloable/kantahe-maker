@@ -9,6 +9,8 @@
 
 The app's domain is kantahe.party.
 
+**Read the overview on loable.tech:** [Kantahe and Kantahe Maker](https://loable.tech/kantahe-self-hosted-karaoke-server/#maker), with the Kantahe karaoke server that plays the files.
+
 <img src="docs/screenshots/05-timing.png" alt="Tapping along to the lyrics of a song in Kantahe Maker" width="880">
 
 *The screenshots show a demo song in the public domain; the lists of matches and lyrics are examples.*
