@@ -98,6 +98,27 @@ String? findBrowser(
   }
 }
 
+final _checkPage = RegExp(
+  r'just a moment|verify you are human|checking your browser|captcha',
+  caseSensitive: false,
+);
+
+/// Whether a page with this [title] and [text] is a check ("are you human") page.
+bool looksLikeCheckPage(String title, String text) =>
+    _checkPage.hasMatch(title) || _checkPage.hasMatch(text);
+
+/// How to start the browser. [forUser]: a normal window in front, for a check the user has to
+/// do. Otherwise a minimized window, or no window at all when [headless] (tests only: real
+/// sites may refuse headless browsers).
+({bool headless, List<String> args}) browserLaunch({
+  required bool headless,
+  required bool forUser,
+}) {
+  if (forUser) return (headless: false, args: const []);
+  if (headless) return (headless: true, args: const []);
+  return (headless: false, args: const ['--start-minimized']);
+}
+
 class CdpException implements Exception {
   final String message;
   const CdpException(this.message);

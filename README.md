@@ -32,7 +32,7 @@ Get the latest version from the [releases page](https://github.com/andrewloable/
 - **Windows**: `kantahe-maker-<version>-windows.zip`. SmartScreen warns about unsigned apps: choose **More info**, then **Run anyway**.
 - **Linux**: `kantahe-maker-<version>-linux.tar.gz`. It needs libmpv (`libmpv2` or `libmpv1`).
 
-The first time, the app asks before it downloads the tools it needs (ffmpeg, Python with the vocal-splitting software, and the model): about 1.4 GB, once.
+The first time, the app asks before it downloads the tools it needs (ffmpeg, Python with the vocal-splitting software, the model, and yt-dlp for songs from a link): about 1.4 GB, once.
 
 ## How it works
 
@@ -88,7 +88,7 @@ Your songs stay on your computer, unless you use the optional AI timing below. T
 - **Details:** the title and artist (or the file name) go to musicbrainz.org.
 - **Lyrics:** the title and artist go to lrclib.net, and to lyrics.ovh when lrclib.net finds nothing. If lrclib.net has a server problem, the app tries again up to 5 times; then a link offers a Google search for the lyrics in your browser. The title and artist go to Google only when you click that link.
 - **Spotify link (optional):** the link you paste goes to open.spotify.com, to read the title, artist and length; those then go to musicbrainz.org and lrclib.net as above.
-- **New song from a Spotify link (robot icon):** the same, and spotsaver.net is opened in a Chrome or Edge window that opens minimized for a few seconds with your link, as if you used the site yourself; it sends back the MP3.
+- **New song from a Spotify link (robot icon):** the same, and the song's title and artist go to YouTube as a search, in a Chrome or Edge window that opens minimized for a few seconds; the audio of the official video is then downloaded from YouTube with yt-dlp. With a YouTube link instead, yt-dlp reads that video's details and downloads it from YouTube; nothing goes to Spotify.
 - **Tools:** with your consent, about 1.4 GB once (see Download).
 - **Auto-time with AI (optional):** if you set it up and click it, the song's vocals go to Cloudflare Workers AI (api.cloudflare.com), after you confirm each time. Nothing is sent unless you do.
 
@@ -100,9 +100,11 @@ Nothing else leaves your computer. There is no account (Cloudflare is needed onl
 
 **How long does vocal splitting take?** It depends on your computer and the song. It runs in the background, so you can fill in the details and lyrics meanwhile. On Windows, Settings has a switch, **Use the graphics card** (off by default), that runs it on the graphics card (NVIDIA, AMD or Intel, through DirectML). The first time it downloads about 650 MB more. On one test song (4:12, RTX 3080) the whole step went from about 104 s to 47 s. If the graphics card cannot be used, the processor is used instead.
 
-**Where does the audio of a Spotify link come from?** The robot icon next to "New song" asks for a Spotify song link and does the rest: spotsaver.net converts a YouTube video of the song to MP3 in a Chrome or Edge window that opens minimized for a few seconds, the details and lyrics come from the link, and the song opens ready for vocal splitting. It is not Spotify's audio, so quality and version can differ. It needs Google Chrome or Microsoft Edge installed. Use it only for songs you have the right to use.
+**Where does the audio of a Spotify link come from?** The robot icon next to "New song" asks for a Spotify song link and does the rest: it searches YouTube for the song in a Chrome or Edge window that opens minimized for a few seconds, picks the official video (the artist's VEVO or official channel first), downloads its audio as MP3 with yt-dlp, takes the details and lyrics from the link, and opens the song ready for vocal splitting. It is not Spotify's audio, so quality and version can differ. It needs Google Chrome or Microsoft Edge installed. If YouTube shows a consent or "are you human" page, a browser window opens in front so you can finish it; the search then goes on by itself. Use it only for songs you have the right to use.
 
-**The download from a Spotify link failed. What now?** Choose your own MP3 in the same window ("Choose an MP3 instead"): the details and lyrics from the link are kept. Or try again.
+**Can I use a YouTube link?** Yes: the robot icon takes a YouTube video link too. Copy the link, click the robot, and the download starts by itself: the title and artist come from the video, then the lyrics are looked up as for a Spotify link. No browser window opens for a YouTube link.
+
+**The download from a Spotify link failed. What now?** Choose your own MP3 in the same window ("Choose an MP3 instead"): the details and lyrics from the link are kept. Or try again. When no official video is found, the same choices are offered.
 
 **Can I edit a .karmp3 I made before?** Yes: click **Open .karmp3** on the home screen. The song opens with its details, lyrics and times as they are in the file, and the audio in the file is used as it is, so nothing is split again. Change what you like, then go to Export: **Save over** replaces the file you opened (after asking you), and **Export as...** saves a copy somewhere else. The file you opened is not touched until you save over it. To use another recording, click **Replace the audio...** on the Song step: the new file is read and split like a new song, and your details, lyrics and times stay (re-tap in Timing if the new audio starts or ends differently). Files made by older versions open too.
 
@@ -140,7 +142,7 @@ tags: you do that by hand.
 - macOS builds are unsigned: the first time, right-click the app and choose Open.
 - Windows shows a SmartScreen warning for an unsigned app.
 - Linux needs libmpv at runtime (`libmpv2` or `libmpv1`, depending on the distro).
-- The tools the app needs (ffmpeg, uv, the vocal-splitting model) are not bundled: the app
+- The tools the app needs (ffmpeg, uv, the vocal-splitting model, yt-dlp) are not bundled: the app
   downloads them after asking for consent.
 
 ## The .karmp3 format

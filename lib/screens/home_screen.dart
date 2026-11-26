@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 
@@ -15,11 +15,16 @@ import '../karmp3_read.dart';
 import '../mp3_info.dart';
 import '../project.dart';
 import '../spotify_link.dart';
-import '../spotsaver.dart';
+import '../tools.dart' show ToolPaths;
 import '../widgets/brand_header.dart';
+import '../youtube_link.dart';
+import '../youtube_rank.dart';
+import '../youtube_search.dart';
+import '../ytdlp.dart';
 import 'pick_files.dart';
 import 'settings_screen.dart';
 import 'song_screen.dart';
+import 'tools_dialog.dart';
 
 /// One folder of the song list; [project] is null when its project.json cannot be read.
 class _Entry {
@@ -39,16 +44,30 @@ class _Entry {
   }
 }
 
-/// What the Home screen needs from [downloadWithSpotsaver]: the MP3 of a Spotify link, saved
-/// in a folder.
-typedef SpotifyDownloader =
-    Future<File> Function(
-      String link,
-      Directory into, {
-      void Function(String status, int? received, int? total)? onStatus,
+/// What the Home screen needs from [searchYoutube]: the videos YouTube finds for a query.
+typedef YoutubeSearcher =
+    Future<List<YoutubeResult>> Function(
+      String query, {
       Future<void>? cancel,
       void Function(CdpBrowser browser)? onBrowser,
+      void Function(String status)? onStatus,
     });
+
+/// What the Home screen needs from [downloadWithYtDlp]: the MP3 of a YouTube video, saved in
+/// a folder, made with the installed [tools].
+typedef AudioDownloader =
+    Future<File> Function(
+      String url,
+      Directory into, {
+      required ToolPaths tools,
+      void Function(String status, int? received, int? total)? onStatus,
+      Future<void>? cancel,
+    });
+
+/// What the Home screen needs from [readYtDlpInfo]: a YouTube video's info, read with the
+/// installed [tools].
+typedef VideoInfoReader =
+    Future<YoutubeVideo> Function(String url, {required ToolPaths tools, Future<void>? cancel});
 
 /// The song list. The seams (everything that touches the machine) have real defaults
 /// and can be replaced in tests.
@@ -61,7 +80,10 @@ class HomeScreen extends StatefulWidget {
     this.settingsBuilder,
     this.now,
     this.spotifyFinder,
-    this.downloader,
+    this.ensureToolsFn,
+    this.youtubeSearch,
+    this.audioDownloader,
+    this.videoInfo,
     this.autofill,
     this.readClipboard,
     this.onLog,
@@ -85,8 +107,19 @@ class HomeScreen extends StatefulWidget {
   /// Reads a pasted Spotify link; null means [findSpotifyTrack].
   final Future<SpotifyTrack> Function(String link)? spotifyFinder;
 
-  /// Gets the MP3 of a Spotify link; null means [downloadWithSpotsaver].
-  final SpotifyDownloader? downloader;
+  /// Gives the installed tools, asking the user to download them first when they are
+  /// missing; null (the user said "Not now") means no song from a link. Null means
+  /// [ensureTools].
+  final Future<ToolPaths?> Function(BuildContext context)? ensureToolsFn;
+
+  /// Searches YouTube for the song; null means [searchYoutube].
+  final YoutubeSearcher? youtubeSearch;
+
+  /// Gets the MP3 of a YouTube video; null means [downloadWithYtDlp].
+  final AudioDownloader? audioDownloader;
+
+  /// Reads a YouTube video's title, channel and length; null means [readYtDlpInfo].
+  final VideoInfoReader? videoInfo;
 
   /// Looks up composer, lyricist and lyrics of a Spotify track; null means
   /// [autofillFromSpotify].
@@ -219,36 +252,79 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _log(String line) => (widget.onLog ?? debugPrint)('[spotify] $line');
 
-  Future<File> _download(
-    String link,
-    Directory into, {
-    void Function(String status, int? received, int? total)? onStatus,
+  static const _noMatch =
+      'No official YouTube upload found for this song. Choose an MP3 file, or try again.';
+
+  Future<List<YoutubeResult>> _search(
+    String query, {
     Future<void>? cancel,
     void Function(CdpBrowser browser)? onBrowser,
-  }) => downloadWithSpotsaver(
-    link,
-    into,
-    onStatus: onStatus,
+    void Function(String status)? onStatus,
+  }) => searchYoutube(
+    query,
     cancel: cancel,
     onBrowser: onBrowser,
+    onStatus: onStatus,
     onLog: _log,
   );
+
+  Future<File> _download(
+    String url,
+    Directory into, {
+    required ToolPaths tools,
+    void Function(String status, int? received, int? total)? onStatus,
+    Future<void>? cancel,
+  }) => downloadWithYtDlp(
+    url,
+    into,
+    ytDlp: tools.ytDlp!,
+    ffmpegDir: p.dirname(tools.ffmpeg),
+    onStatus: onStatus,
+    cancel: cancel,
+    onJob: jobs.track,
+    onLog: _log,
+  );
+
+  Future<YoutubeVideo> _videoInfo(
+    String url, {
+    required ToolPaths tools,
+    Future<void>? cancel,
+  }) => readYtDlpInfo(url, ytDlp: tools.ytDlp!, cancel: cancel, onJob: jobs.track);
 
   static Future<String?> _clipboard() async =>
       (await Clipboard.getData(Clipboard.kTextPlain))?.text;
 
-  /// The robot icon: asks for a Spotify link, then does everything else by itself.
+  static const _maxClipboardLink = 10000;
+
+  /// The robot icon: makes sure the tools are installed (the download needs yt-dlp and
+  /// ffmpeg), asks for a Spotify link, then does everything else by itself.
   Future<void> _newFromSpotify() async {
+    // A second click while the first is still starting (or its dialog is open) does nothing.
+    if (_robotBusy) return;
+    _robotBusy = true;
+    try {
+      await _robotFlow();
+    } finally {
+      _robotBusy = false;
+    }
+  }
+
+  bool _robotBusy = false;
+
+  Future<void> _robotFlow() async {
+    final tools = await (widget.ensureToolsFn ?? ensureTools)(context);
+    if (tools == null || !mounted) return;
     var initial = '';
     try {
       final text = (await (widget.readClipboard ?? _clipboard)())?.trim() ?? '';
-      if (spotifyTrackId(text) != null || spotifyShortLink(text) != null) {
-        initial = text;
-      }
+      // A text this long is no song link; looking through it could take a while.
+      if (text.length <= _maxClipboardLink && _isSongLink(text)) initial = text;
     } catch (_) {
       // No clipboard: the box starts empty.
     }
     if (!mounted) return;
+    // A YouTube link from the clipboard needs no choice: the download starts at once.
+    final autoStart = initial.isNotEmpty && _youtubeIn(initial) != null;
     final job = _SpotifyJob();
     await showDialog<void>(
       context: context,
@@ -262,21 +338,26 @@ class _HomeScreenState extends State<HomeScreen> {
         return _SpotifyDialog(
           job: job,
           initialText: initial,
-          onStart: (link) => unawaited(_spotifyFlow(link, job)),
+          autoStart: autoStart,
+          onStart: (link) => unawaited(_spotifyFlow(link, job, tools)),
         );
       },
     );
   }
 
-  /// Link to song: read the link, get the MP3 while the details and lyrics are looked up,
-  /// and only then make the song. When the download fails the user may choose a file
-  /// instead (the details and lyrics are kept), try again, or give up.
-  Future<void> _spotifyFlow(String link, _SpotifyJob job) async {
+  /// Link to song: read the link, find the song's official upload on YouTube and get its MP3
+  /// while the details and lyrics are looked up, and only then make the song. When the
+  /// search or the download fails the user may choose a file instead (the details and
+  /// lyrics are kept), try again, or give up.
+  Future<void> _spotifyFlow(String link, _SpotifyJob job, ToolPaths tools) async {
     Directory? temp;
     final audio = Completer<double?>();
     SpotifyTrack? track;
+    // A YouTube link: its own video is downloaded (no search), and its info gives the song.
+    final youtube = _youtubeIn(link);
+    YoutubeVideo? video;
     Future<AutofillResult>? lookups;
-    _log('flow start (${spotifyTrackId(link) != null ? 'track link' : 'short link'})');
+    _log('flow start (${youtube != null ? 'youtube link' : spotifyTrackId(link) != null ? 'track link' : 'short link'})');
 
     /// Shows [message] with the user's choices; true when the flow is over.
     Future<bool> failed(String message) async {
@@ -309,28 +390,71 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       while (!job.cancelled) {
         try {
-          job.workingOn('Reading the Spotify link...');
           if (track == null) {
-            final reading = (widget.spotifyFinder ?? findSpotifyTrack)(link);
-            unawaited(reading.then((_) {}, onError: (Object _) {}));
-            track = await Future.any<SpotifyTrack?>([
-              reading,
-              job.cancel.future.then((_) => null),
-            ]);
-            if (track == null || job.cancelled) return;
+            if (youtube != null) {
+              job.workingOn('Reading the YouTube video...');
+              final v = await (widget.videoInfo ?? _videoInfo)(
+                youtube,
+                tools: tools,
+                cancel: job.cancel.future,
+              );
+              if (job.cancelled) return;
+              final song = songFromYoutube(v);
+              video = v;
+              track = SpotifyTrack(id: v.id, title: song.title, artist: song.artist, seconds: v.seconds);
+            } else {
+              job.workingOn('Reading the Spotify link...');
+              final reading = (widget.spotifyFinder ?? findSpotifyTrack)(link);
+              unawaited(reading.then((_) {}, onError: (Object _) {}));
+              track = await Future.any<SpotifyTrack?>([
+                reading,
+                job.cancel.future.then((_) => null),
+              ]);
+              if (track == null || job.cancelled) return;
+            }
             _log('link read: "${track.title}" by "${track.artist}", ${track.seconds.toStringAsFixed(1)} s');
           }
           lookups ??= (widget.autofill ??
               (t, a) => autofillFromSpotify(t, a, onLog: _log))(track, audio.future);
           temp ??= await Directory.systemTemp.createTemp('kantahe_dl');
+          final String url;
+          if (video != null) {
+            url = video.url;
+          } else {
+            job.workingOn('Searching YouTube...');
+            _log('search starts');
+            final results = await (widget.youtubeSearch ?? _search)(
+              '${track.artist} ${track.title}',
+              cancel: job.cancel.future,
+              onBrowser: jobs.track,
+              onStatus: job.workingOn,
+            );
+            if (job.cancelled) return;
+            final best = rankYoutubeResults(
+              results,
+              title: track.title,
+              artist: track.artist,
+              seconds: track.seconds,
+            );
+            if (best == null) {
+              _log('no fitting video among ${results.length}');
+              if (await failed(_noMatch)) return;
+              continue;
+            }
+            _log('picked video ${best.videoId} of ${results.length}');
+            url = best.url;
+          }
+          job.workingOn('Downloading the audio...');
           _log('download starts');
-          final file = await (widget.downloader ?? _download)(
-            link,
+          final file = await (widget.audioDownloader ?? _download)(
+            url,
             temp,
+            tools: tools,
             onStatus: job.progress,
             cancel: job.cancel.future,
-            onBrowser: jobs.track,
           );
+          // A cancel that came as the download finished still means no song.
+          if (job.cancelled) return;
           final seconds = await mp3FileSeconds(file.path);
           _log('download finished: ${file.lengthSync()} bytes, '
               '${seconds == null ? 'length unknown' : '${seconds.toStringAsFixed(1)} s'}');
@@ -338,7 +462,10 @@ class _HomeScreenState extends State<HomeScreen> {
           job.workingOn('Creating the song...');
           await _createSpotifySong(await lookups, job, copyFrom: file.path);
           return;
-        } on SpotsaverException catch (e) {
+        } on YoutubeSearchException catch (e) {
+          if (e.message == 'Cancelled' || job.cancelled) return;
+          if (await failed(e.message)) return;
+        } on YtDlpException catch (e) {
           if (e.message == 'Cancelled' || job.cancelled) return;
           if (await failed(e.message)) return;
         } catch (e, stack) {
@@ -364,6 +491,11 @@ class _HomeScreenState extends State<HomeScreen> {
     String? copyFrom,
     String? inputPath,
   }) async {
+    // Cancel stays possible while the lookups finish ("Creating the song..."): then no song.
+    if (job.cancelled) {
+      _log('cancelled before the song was made');
+      return;
+    }
     final (dir, id) = await _makeSongDir();
     await dir.create(recursive: true);
     var input = inputPath;
@@ -451,7 +583,7 @@ class _HomeScreenState extends State<HomeScreen> {
           FloatingActionButton(
             key: const ValueKey('new-from-spotify'),
             heroTag: 'new-from-spotify',
-            tooltip: 'New song from a Spotify link',
+            tooltip: 'New song from a Spotify or YouTube link',
             onPressed: _newFromSpotify,
             child: const Icon(Icons.smart_toy_outlined),
           ),
@@ -521,6 +653,14 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
+bool _isSpotifyLink(String text) => spotifyTrackId(text) != null || spotifyShortLink(text) != null;
+
+/// The YouTube video link in [text], unless it holds a Spotify link (that one wins).
+String? _youtubeIn(String text) => _isSpotifyLink(text) ? null : youtubeVideoUrl(text);
+
+/// Whether [text] holds a link the robot can start from.
+bool _isSongLink(String text) => _isSpotifyLink(text) || youtubeVideoUrl(text) != null;
+
 /// What the Spotify dialog shows and what the user chose, for the flow to read.
 class _SpotifyJob extends ChangeNotifier {
   /// What the dialog shows: the link box, the progress, or a failure with choices.
@@ -586,11 +726,15 @@ class _SpotifyDialog extends StatefulWidget {
     required this.job,
     required this.initialText,
     required this.onStart,
+    this.autoStart = false,
   });
 
   final _SpotifyJob job;
   final String initialText;
   final void Function(String link) onStart;
+
+  /// Start with [initialText] at once, without waiting for Download.
+  final bool autoStart;
 
   @override
   State<_SpotifyDialog> createState() => _SpotifyDialogState();
@@ -598,11 +742,17 @@ class _SpotifyDialog extends StatefulWidget {
 
 class _SpotifyDialogState extends State<_SpotifyDialog> {
   static const notice =
-      'The song is converted from a YouTube video by spotsaver.net, a service not '
-      'connected to Spotify or to Kantahe Maker, in a Chrome or Edge window that opens minimized for a few seconds. '
+      'The song is downloaded from YouTube with yt-dlp. For a Spotify link, a Chrome or Edge '
+      'window opens minimized for a few seconds to search YouTube for the official video. '
       'Use it only for songs you have the right to use.';
 
   late final _link = TextEditingController(text: widget.initialText);
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.autoStart) WidgetsBinding.instance.addPostFrameCallback((_) => _start());
+  }
 
   @override
   void dispose() {
@@ -610,12 +760,13 @@ class _SpotifyDialogState extends State<_SpotifyDialog> {
     super.dispose();
   }
 
-  bool get _valid =>
-      spotifyTrackId(_link.text) != null || spotifyShortLink(_link.text) != null;
+  bool get _valid => _isSongLink(_link.text);
 
   void _start() {
-    if (!_valid) return;
-    widget.job.workingOn('Reading the Spotify link...');
+    if (!mounted || !_valid || widget.job.working) return;
+    widget.job.workingOn(
+      _youtubeIn(_link.text) != null ? 'Reading the YouTube video...' : 'Reading the Spotify link...',
+    );
     widget.onStart(_link.text.trim());
   }
 
@@ -630,7 +781,7 @@ class _SpotifyDialogState extends State<_SpotifyDialog> {
             : null;
         return AlertDialog(
           key: const ValueKey('spotify-dialog'),
-          title: const Text('New song from a Spotify link'),
+          title: const Text('New song from a link'),
           content: SizedBox(
             width: 460,
             child: Column(
@@ -643,8 +794,8 @@ class _SpotifyDialogState extends State<_SpotifyDialog> {
                     controller: _link,
                     autofocus: true,
                     decoration: const InputDecoration(
-                      labelText: 'Spotify link',
-                      hintText: 'Paste a Spotify song link',
+                      labelText: 'Spotify or YouTube link',
+                      hintText: 'Paste a Spotify or YouTube song link',
                       border: OutlineInputBorder(),
                     ),
                     onChanged: (_) => setState(() {}),

@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kantahe_maker/lyrics_lookup.dart';
 import 'package:kantahe_maker/screens/lyrics_search_panel.dart';

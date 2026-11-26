@@ -1,5 +1,5 @@
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kantahe_maker/screens/tap_screen.dart';
@@ -1100,6 +1100,9 @@ void main() {
     VoidCallback? resetAction(WidgetTester tester) =>
         tester.widget<OutlinedButton>(find.byKey(const ValueKey('word-reset'))).onPressed;
 
+    String? hint(WidgetTester tester) =>
+        tester.widget<Text>(find.byKey(const ValueKey('word-reset-hint'))).data;
+
     testWidgets('reset_button_clears_the_selected_lines_words', (tester) async {
       final h = await screen(tester);
       await wordOn(tester);
@@ -1135,8 +1138,10 @@ void main() {
       await wordOn(tester);
       expect(find.byKey(const ValueKey('word-reset')), findsOneWidget);
       expect(resetAction(tester), isNull, reason: 'the selected line has no word times');
+      expect(hint(tester), 'This line has no word times yet');
       await tapWord(tester, h, 1.4);
       expect(resetAction(tester), isNotNull);
+      expect(find.byKey(const ValueKey('word-reset-hint')), findsNothing);
     });
 
     testWidgets('reset_leaves_other_lines_alone', (tester) async {
@@ -1172,6 +1177,7 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('word-reset')), warnIfMissed: false);
       await tester.pump();
       expect(h.wordChanges, isEmpty, reason: 'previewing never changes the taps');
+      expect(hint(tester), 'Off while previewing');
     });
 
     testWidgets('backspace_after_a_click_stays_on_the_selected_line', (tester) async {

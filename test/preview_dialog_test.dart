@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kantahe_maker/karmp3.dart' show LrcLine;
 import 'package:kantahe_maker/screens/preview_dialog.dart';

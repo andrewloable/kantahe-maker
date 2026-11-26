@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kantahe_maker/screens/tools_dialog.dart';
 import 'package:kantahe_maker/tools.dart';
@@ -42,13 +42,16 @@ void main() {
   group('toolItems', () {
     test('items_for_mac', () {
       final items = toolItems(HostOs.macos, HostArch.arm64);
-      expect(items, hasLength(4));
+      expect(items, hasLength(5));
       expect(items.map((i) => i.name), [
         'ffmpeg and ffprobe',
         'uv (Python manager)',
         'Python and audio-separator',
         'Vocal-splitting model (UVR)',
+        'yt-dlp (downloads songs from YouTube)',
       ]);
+      expect(items[4].source, 'pypi.org');
+      expect(items[4].license, 'Unlicense');
       expect(items[0].source, 'ffmpeg.martin-riedl.de');
       expect(items[1].source, 'github.com');
       expect(items[2].source, 'pypi.org');
@@ -84,8 +87,9 @@ void main() {
             install: (l, p) async => run.installCalls++)));
     await _open(tester);
     expect(find.text('Download required tools?'), findsOneWidget);
-    expect(find.byType(ListTile), findsNWidgets(4));
-    expect(find.textContaining('MB'), findsNWidgets(4));
+    expect(find.byType(ListTile), findsNWidgets(5));
+    expect(find.textContaining('MB'), findsNWidgets(5));
+    expect(find.text('yt-dlp (downloads songs from YouTube)'), findsOneWidget);
     expect(find.textContaining('Nothing is downloaded until you click Download'),
         findsOneWidget);
     expect(find.text('Not now'), findsOneWidget);

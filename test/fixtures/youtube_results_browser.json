@@ -1,0 +1,152 @@
+{
+  "contents": {
+    "twoColumnSearchResultsRenderer": {
+      "primaryContents": {
+        "sectionListRenderer": {
+          "contents": [
+            {
+              "itemSectionRenderer": {
+                "contents": [
+                  {
+                    "searchPyvRenderer": { "ads": [] }
+                  },
+                  {
+                    "lockupViewModel": {
+                      "contentId": "bbbbbbbbbb1",
+                      "contentType": "LOCKUP_CONTENT_TYPE_VIDEO",
+                      "contentImage": {
+                        "thumbnailViewModel": {
+                          "image": { "sources": [] },
+                          "overlays": [
+                            {
+                              "thumbnailBottomOverlayViewModel": {
+                                "badges": [
+                                  { "thumbnailBadgeViewModel": { "text": "3:45", "badgeStyle": "THUMBNAIL_OVERLAY_BADGE_STYLE_DEFAULT" } }
+                                ]
+                              }
+                            },
+                            { "thumbnailHoverOverlayToggleActionsViewModel": { "buttons": [] } }
+                          ]
+                        }
+                      },
+                      "metadata": {
+                        "lockupMetadataViewModel": {
+                          "title": { "content": "Singer - Song (Official Video)" },
+                          "metadata": {
+                            "contentMetadataViewModel": {
+                              "metadataRows": [
+                                {
+                                  "metadataParts": [
+                                    {
+                                      "avatarStack": {
+                                        "avatarStackViewModel": {
+                                          "avatars": [],
+                                          "text": { "content": "Singer" }
+                                        }
+                                      },
+                                      "icon": { "name": "AUDIO_BADGE", "height": 14, "width": 14, "accessibilityLabel": "Official Artist Channel" }
+                                    },
+                                    { "text": { "content": "1.2M" }, "accessibilityLabel": "1.2 million views" }
+                                  ],
+                                  "lockupContentMetadataRowExtension": { "contentType": "METADATA_ROW_CONTENT_TYPE_BYLINE" }
+                                },
+                                { "isSpacerRow": true }
+                              ]
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "lockupViewModel": {
+                      "contentId": "PLbbbbbbbbbbbbbbbbbbbbbb",
+                      "contentType": "LOCKUP_CONTENT_TYPE_PLAYLIST",
+                      "metadata": {
+                        "lockupMetadataViewModel": { "title": { "content": "Song Mix" } }
+                      }
+                    }
+                  },
+                  {
+                    "lockupViewModel": {
+                      "contentId": "bbbbbbbbbb2",
+                      "contentType": "LOCKUP_CONTENT_TYPE_VIDEO",
+                      "contentImage": {
+                        "thumbnailViewModel": {
+                          "overlays": [
+                            {
+                              "thumbnailBottomOverlayViewModel": {
+                                "badges": [{ "thumbnailBadgeViewModel": { "text": "1:02:03" } }]
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      "metadata": {
+                        "lockupMetadataViewModel": {
+                          "title": { "content": "Song (Lyrics)" },
+                          "metadata": {
+                            "contentMetadataViewModel": {
+                              "metadataRows": [
+                                {
+                                  "metadataParts": [
+                                    {
+                                      "avatarStack": {
+                                        "avatarStackViewModel": { "text": { "content": "Lyrics Hub" } }
+                                      },
+                                      "icon": { "sources": [], "accessibilityLabel": "Verified" }
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "gridShelfViewModel": { "contents": [] }
+                  },
+                  {
+                    "lockupViewModel": {
+                      "contentId": "bbbbbbbbbb3",
+                      "contentType": "LOCKUP_CONTENT_TYPE_VIDEO",
+                      "contentImage": { "thumbnailViewModel": { "overlays": [] } },
+                      "metadata": {
+                        "lockupMetadataViewModel": {
+                          "title": { "content": "Song live now" },
+                          "metadata": {
+                            "contentMetadataViewModel": {
+                              "metadataRows": [
+                                { "metadataParts": [{ "text": { "content": "Stream Channel" } }] }
+                              ]
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "lockupViewModel": {
+                      "contentType": "LOCKUP_CONTENT_TYPE_VIDEO",
+                      "metadata": { "lockupMetadataViewModel": { "title": { "content": "No id" } } }
+                    }
+                  },
+                  {
+                    "videoRenderer": {
+                      "videoId": "bbbbbbbbbb4",
+                      "title": { "runs": [{ "text": "Song (Audio)" }] },
+                      "ownerText": { "runs": [{ "text": "Singer - Topic" }] },
+                      "lengthText": { "simpleText": "3:44" }
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

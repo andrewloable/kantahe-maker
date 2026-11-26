@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 
@@ -490,6 +490,14 @@ class _TapScreenState extends State<TapScreen> {
     final wordTimes = _session.wordTimes;
     final highlighted = _highlighted;
     _keepVisible(highlighted);
+    // Why "Reset the words of this line" is off; null when it is on.
+    final resetOff = _preview
+        ? 'Off while previewing'
+        : _wordLine < 0
+        ? 'Click a line to select it'
+        : wordTimes[_wordLine] == null
+        ? 'This line has no word times yet'
+        : null;
     final seconds = _position.inMicroseconds / 1e6;
     final total = _duration.inMicroseconds / 1e6;
     final mono = Theme.of(context).textTheme.bodyMedium?.copyWith(
@@ -627,17 +635,25 @@ class _TapScreenState extends State<TapScreen> {
               ),
               if (_wordMode)
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: OutlinedButton(
-                      key: const ValueKey('word-reset'),
-                      onPressed:
-                          !_preview && _wordLine >= 0 && wordTimes[_wordLine] != null
-                          ? _resetWords
-                          : null,
-                      child: const Text('Reset the words of this line'),
-                    ),
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+                  child: Row(
+                    children: [
+                      OutlinedButton(
+                        key: const ValueKey('word-reset'),
+                        onPressed: resetOff == null ? _resetWords : null,
+                        child: const Text('Reset the words of this line'),
+                      ),
+                      if (resetOff != null) ...[
+                        const SizedBox(width: 12),
+                        Flexible(
+                          child: Text(
+                            resetOff,
+                            key: const ValueKey('word-reset-hint'),
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                 ),
               const Divider(height: 1),

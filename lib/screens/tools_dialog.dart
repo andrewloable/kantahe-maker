@@ -1,6 +1,6 @@
 import 'dart:io';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import '../app_dirs.dart';
 import '../settings.dart';
 import '../tool_pins.dart';
@@ -22,7 +22,7 @@ class ToolItem {
   const ToolItem(this.name, this.source, this.sizeMb, this.license);
 }
 
-/// The four downloads, with where they come from, how big they are and their license.
+/// The five downloads, with where they come from, how big they are and their license.
 /// The ffmpeg and uv hosts come from the pinned URLs for this computer.
 List<ToolItem> toolItems(HostOs os, HostArch arch) {
   final downloads = downloadsFor(os, arch);
@@ -41,6 +41,8 @@ List<ToolItem> toolItems(HostOs os, HostArch arch) {
         '${toolLicenses['Python']} / ${toolLicenses['audio-separator']}'),
     ToolItem('Vocal-splitting model (UVR)', 'github.com (UVR models)',
         approxSizeMb['model']!, toolLicenses['UVR model']!),
+    ToolItem('yt-dlp (downloads songs from YouTube)', 'pypi.org',
+        approxSizeMb['yt-dlp']!, toolLicenses['yt-dlp']!),
   ];
 }
 

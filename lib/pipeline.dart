@@ -399,7 +399,7 @@ class SeparationJob implements CancellableJob {
     if (_cancelled) return;
     _cancelled = true;
     final running = _current;
-    if (running != null) unawaited(_killTree(running, _killGrace));
+    if (running != null) unawaited(killProcessTree(running, _killGrace));
   }
 
   /// PATH with ffmpeg's folder first: audio-separator runs the bare name ffmpeg. Null when
@@ -419,7 +419,7 @@ class SeparationJob implements CancellableJob {
       await runLogged(exe, args, environment: _environment, onLine: collect?.add ?? _onLine, onStart: (proc) {
         _current = proc;
         // cancel() may have come while the program was starting.
-        if (_cancelled) unawaited(_killTree(proc, _killGrace));
+        if (_cancelled) unawaited(killProcessTree(proc, _killGrace));
       });
     } finally {
       _current = null;
@@ -514,7 +514,7 @@ SeparationJob separate(
 /// On macOS and Linux the tree is first frozen (SIGSTOP) so nothing in it can start
 /// another process while it is being listed, then every process gets SIGTERM, children
 /// first; whatever is still alive after [grace] gets SIGKILL.
-Future<void> _killTree(Process proc, Duration grace) async {
+Future<void> killProcessTree(Process proc, Duration grace) async {
   if (Platform.isWindows) {
     await Process.run('taskkill', ['/T', '/F', '/PID', '${proc.pid}']);
     return;

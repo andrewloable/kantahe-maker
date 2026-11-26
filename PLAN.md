@@ -39,14 +39,25 @@ song to the same path through the usual `.part` file and rename, so a failure le
 it was) and **Export as...** (the Save dialog, for a copy elsewhere).
 
 A **robot icon** next to **New song** starts a song from a Spotify link instead: a dialog asks for
-the link (prefilled from the clipboard when it holds one) and shows a notice that the audio is
-converted by spotsaver.net. lib/spotify_link.dart reads the title, artist and length;
-lib/spotsaver.dart (on lib/cdp.dart) drives spotsaver.net in a Chrome or Edge window that opens minimized for a few seconds and
-saves the MP3 in a temporary folder, while lib/autofill.dart looks up composer, lyricist and
-lyrics at the same time. Only when the audio exists is the song folder made (so a failure or a
-cancel leaves nothing behind); the song then opens and vocal splitting starts as for any other
-song. When the download fails the user may choose an MP3 file instead and keeps the details and
-lyrics.
+the link (prefilled from the clipboard when it holds one) and shows a notice that the audio comes
+from YouTube through yt-dlp. The tools (yt-dlp among them) must be installed first: the robot asks
+for them with the usual consent dialog. lib/spotify_link.dart reads the title, artist and length;
+lib/youtube_search.dart (on lib/cdp.dart) searches YouTube for "artist title" in a Chrome or Edge
+window that opens minimized for a few seconds and reads the results from the page's data
+(ytInitialData); lib/youtube_rank.dart picks the official upload (VEVO, the official artist
+channel, "Artist - Topic", "Official" in the title, a length close to Spotify's; a live, cover,
+karaoke or remix version the Spotify song is not scores much lower); lib/ytdlp.dart downloads its audio as
+an MP3 into a temporary folder with yt-dlp and the managed ffmpeg. A consent or check page on
+YouTube opens in a visible window for the user to finish; the app never clicks through it.
+Meanwhile lib/autofill.dart looks up composer, lyricist and lyrics. Only when the audio exists is
+the song folder made (so a failure or a cancel leaves nothing behind); the song then opens and
+vocal splitting starts as for any other song. When no fitting video is found, or the search or
+download fails, the user may choose an MP3 file instead and keeps the details and lyrics, or try
+again. The robot also takes a YouTube video link (lib/youtube_link.dart): then there is no search
+and no browser; yt-dlp reads the video's info, which gives the title, artist and length
+(songFromYoutube), and downloads that video. With a YouTube link on the clipboard the download
+starts as soon as the dialog opens; a Spotify link, or a link typed into the box, waits for
+Download. Clipboard text longer than 10,000 characters is ignored.
 
 1. **Song**: shows the chosen file. ffmpeg writes `source.mp3` (a plain copy when the input is
    already MP3) and `source.wav` (44.1 kHz stereo, used for separation).
@@ -120,6 +131,8 @@ app runs with `dart:io` `Process`. Nothing outside the app is bundled with it.
 | Piece | Choice | Why |
 |---|---|---|
 | UI | Flutter desktop (macOS, Linux, Windows) | the stated requirement |
+| Material widgets | `material_ui` (flutter.dev) | Flutter's Material library as its own package; `package:flutter/material.dart` is deprecated since Flutter 3.47 and is a separate copy of the same classes, so nothing may import it (test/material_ui_test.dart checks this) |
+| YouTube download | **yt-dlp** with deno (external, installed with `uv`) | gets the audio of a YouTube video; the search runs in an installed Chrome or Edge over CDP (no library) |
 | Playback for tapping | `media_kit` + `media_kit_libs_audio` (libmpv) | plays the same way on all three OSes, gives an accurate position and supports playback speed |
 | Open and save dialogs | `file_selector` (flutter.dev) | first-party, works on all three desktops |
 | ZIP writing | `archive` | ZIP with deflate, plus the tar/xz/zip extraction that tool downloads need |
@@ -145,6 +158,13 @@ app runs with `dart:io` `Process`. Nothing outside the app is bundled with it.
   separation. `UV_CACHE_DIR`, `UV_PYTHON_INSTALL_DIR` and `UV_TOOL_DIR` point inside the
   app's tools folder, and so does `--model_file_dir`. Everything therefore stays in one
   folder that the user can delete.
+- **yt-dlp** (songs from a Spotify or YouTube link): installed with uv like audio-separator
+  (`uv tool install yt-dlp[default]==ytDlpVersion --with deno`, lib/tools.dart installYtDlp).
+  deno is the JavaScript runtime yt-dlp needs for full YouTube support; the installed yt-dlp
+  finds it by itself. PyPI has no deno wheel for Windows arm64, so there yt-dlp is installed
+  without it (it still works, with a warning). YouTube changes often, so an old yt-dlp stops working: bump
+  `ytDlpVersion` in lib/tool_pins.dart to the newest release on PyPI when downloads fail.
+  Only the app's own copy in tools/bin counts (installed with deno where PyPI has it).
 - A single consent dialog lists each item with its source URL, approximate size and
   license. Nothing is downloaded until the user clicks Download. Clicking it is the consent,
   so no consent file is kept: the dialog appears again whenever tools are missing. A

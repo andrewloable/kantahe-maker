@@ -70,7 +70,7 @@ void main() {
   });
 
   test('mp3_info_skips_stacked_id3_tags', () {
-    // spotsaver.net sends two tags one after the other: the second one is not audio.
+    // Some converters send two tags one after the other: the second one is not audio.
     final bytes = withHeader([0xFF, 0xFB, 0xE0, 0x64], before: [...id3Tag(300), ...id3Tag(50)]);
     final i = readMp3Info(bytes)!;
     expect((i.kbps, i.hertz, i.channels), (320, 44100, 2));

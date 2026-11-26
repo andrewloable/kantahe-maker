@@ -96,11 +96,19 @@ void main() {
   });
 
   test('licenses_and_sizes', () {
-    expect(toolLicenses.length, 5);
+    expect(toolLicenses.length, 6);
     expect(toolLicenses.values.every((v) => v.isNotEmpty), isTrue);
-    expect(approxSizeMb.length, 5);
+    expect(toolLicenses['yt-dlp'], 'Unlicense');
+    expect(approxSizeMb.length, 6);
+    expect(approxSizeMb['yt-dlp'], greaterThan(0));
     expect(approxSizeMb['graphics card'], 650);
     expect(approxSizeMb.values.every((v) => v > 0), isTrue);
+  });
+
+  test('yt_dlp_settings', () {
+    expect(ytDlpVersion, matches(RegExp(r'^\d{4}\.\d{2}\.\d{2}(\.\d+)?$')));
+    // Without a JavaScript runtime yt-dlp warns that YouTube support is deprecated (spike km-65t.9).
+    expect(ytDlpJsRuntime, 'deno');
   });
 
   test('separator_settings', () {

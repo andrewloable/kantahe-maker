@@ -41,6 +41,7 @@ dependencies:
   path_provider: ^2.1.6
   path: ^1.9.1
   crypto: ^3.0.8
+  material_ui: ^1.11.1
 
 dev_dependencies:
   flutter_test:

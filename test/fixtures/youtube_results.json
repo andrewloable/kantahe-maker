@@ -1,0 +1,76 @@
+{
+  "responseContext": {},
+  "contents": {
+    "twoColumnSearchResultsRenderer": {
+      "primaryContents": {
+        "sectionListRenderer": {
+          "contents": [
+            {
+              "itemSectionRenderer": {
+                "contents": [
+                  {
+                    "adSlotRenderer": {
+                      "slotId": "0:1:2"
+                    }
+                  },
+                  {
+                    "videoRenderer": {
+                      "videoId": "aaaaaaaaaa1",
+                      "title": { "runs": [{ "text": "Singer - Song " }, { "text": "(Official Video)" }] },
+                      "ownerText": { "runs": [{ "text": "Singer" }] },
+                      "lengthText": { "simpleText": "3:45" },
+                      "ownerBadges": [
+                        { "metadataBadgeRenderer": { "style": "BADGE_STYLE_TYPE_VERIFIED_ARTIST", "tooltip": "Official Artist Channel" } }
+                      ]
+                    }
+                  },
+                  {
+                    "shelfRenderer": {
+                      "title": { "simpleText": "People also watched" },
+                      "content": { "verticalListRenderer": { "items": [] } }
+                    }
+                  },
+                  {
+                    "videoRenderer": {
+                      "videoId": "aaaaaaaaaa2",
+                      "title": { "runs": [{ "text": "Song (Full Concert)" }] },
+                      "ownerText": { "runs": [{ "text": "Live Stage" }] },
+                      "lengthText": { "simpleText": "1:02:03" },
+                      "ownerBadges": [
+                        { "metadataBadgeRenderer": { "style": "BADGE_STYLE_TYPE_VERIFIED", "tooltip": "Verified" } }
+                      ]
+                    }
+                  },
+                  {
+                    "videoRenderer": {
+                      "videoId": "aaaaaaaaaa3",
+                      "title": { "runs": [{ "text": "Song live now" }] },
+                      "ownerText": { "runs": [{ "text": "Stream " }, { "text": "Channel" }] }
+                    }
+                  },
+                  {
+                    "videoRenderer": {
+                      "title": { "runs": [{ "text": "No id" }] },
+                      "ownerText": { "runs": [{ "text": "X" }] }
+                    }
+                  },
+                  {
+                    "channelRenderer": {
+                      "channelId": "UC123",
+                      "title": { "simpleText": "Singer" }
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "continuationItemRenderer": {
+                "trigger": "CONTINUATION_TRIGGER_ON_ITEM_SHOWN"
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

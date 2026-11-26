@@ -1,7 +1,7 @@
-// Pure helpers for the external tools (ffmpeg, ffprobe, uv, audio-separator): host
+// Pure helpers for the external tools (ffmpeg, ffprobe, uv, audio-separator, yt-dlp): host
 // detection, the tools folder layout, finding an installed tool, parsing checksum
 // files, and the I/O that installs them: verified download, extraction, the uv
-// install of audio-separator. No Flutter imports.
+// installs of audio-separator and yt-dlp. No Flutter imports.
 
 import 'dart:convert';
 import 'dart:io';
@@ -119,6 +119,10 @@ String? expectedSha256(String checksumText, String fileName) {
 class ToolPaths {
   final String ffmpeg, ffprobe, separator, modelDir;
 
+  /// yt-dlp, for songs from a link. [resolve] always sets it; it is optional only so code
+  /// that never downloads songs (and its tests) need not give one.
+  final String? ytDlp;
+
   /// Vocal splitting runs on the graphics card: the user's setting, on Windows only.
   final bool useGraphicsCard;
   const ToolPaths({
@@ -126,6 +130,7 @@ class ToolPaths {
     required this.ffprobe,
     required this.separator,
     required this.modelDir,
+    this.ytDlp,
     this.useGraphicsCard = false,
   });
 }
@@ -427,11 +432,41 @@ Future<void> installSeparator(
   );
 }
 
+/// What is installed with yt-dlp on this host: deno, except on Windows arm64, where PyPI
+/// has no deno wheel and building it from source fails. yt-dlp works there without it, with
+/// a warning that some YouTube formats may be missing.
+List<String> ytDlpExtraPackagesFor(HostOs os, HostArch arch) =>
+    os == HostOs.windows && arch == HostArch.arm64 ? const [] : const [ytDlpJsRuntime];
+
+/// Installs yt-dlp (with [ytDlpExtraPackagesFor], deno, so YouTube works fully) with uv into
+/// the tools folder: tools/bin gets yt-dlp, on the same uv-managed Python as audio-separator.
+Future<void> installYtDlp(
+  String uvPath,
+  ToolsDir d,
+  HostOs os,
+  HostArch arch, {
+  void Function(String line)? onLine,
+}) =>
+    runLogged(
+      uvPath,
+      [
+        'tool',
+        'install',
+        '--managed-python',
+        '--python',
+        pythonVersion,
+        for (final package in ytDlpExtraPackagesFor(os, arch)) ...['--with', package],
+        'yt-dlp[default]==$ytDlpVersion',
+      ],
+      environment: uvEnv(d),
+      onLine: onLine,
+    );
+
 // -------------------------------------------------------------------- status
 
 /// Where each tool is, or null if it is missing. ffmpeg and ffprobe may come from the
-/// system (PATH, Homebrew folders on macOS). uv and audio-separator count only when
-/// they are in the tools folder, because the app needs its own copies.
+/// system (PATH, Homebrew folders on macOS). uv, audio-separator and yt-dlp count only
+/// when they are in the tools folder, because the app needs its own copies.
 Map<String, String?> toolStatus(
   ToolsDir d,
   HostOs os,
@@ -453,11 +488,12 @@ Map<String, String?> toolStatus(
     'uv': onlyInBin('uv'),
     'audio-separator': onlyInBin('audio-separator'),
     'model': File(model).existsSync() ? model : null,
+    'yt-dlp': onlyInBin('yt-dlp'),
   };
 }
 
-/// The tools the pipeline needs, or null if any is missing. uv is not needed once
-/// audio-separator is installed.
+/// The tools the app needs, or null if any is missing. uv is not needed once
+/// audio-separator and yt-dlp are installed.
 ToolPaths? resolve(
   ToolsDir d,
   HostOs os,
@@ -467,7 +503,12 @@ ToolPaths? resolve(
 }) {
   final s = toolStatus(d, os, env, extraDirs: extraDirs);
   final ffmpeg = s['ffmpeg'], ffprobe = s['ffprobe'], separator = s['audio-separator'];
-  if (ffmpeg == null || ffprobe == null || separator == null || s['model'] == null) {
+  final ytDlp = s['yt-dlp'];
+  if (ffmpeg == null ||
+      ffprobe == null ||
+      separator == null ||
+      s['model'] == null ||
+      ytDlp == null) {
     return null;
   }
   return ToolPaths(
@@ -475,6 +516,7 @@ ToolPaths? resolve(
       ffprobe: ffprobe,
       separator: separator,
       modelDir: d.models,
+      ytDlp: ytDlp,
       // DirectML exists on Windows only.
       useGraphicsCard: useGraphicsCard && os == HostOs.windows);
 }
@@ -483,7 +525,7 @@ ToolPaths? resolve(
 
 /// Installs whatever is missing: downloads and extracts ffmpeg, ffprobe and uv for
 /// this host (skipping what [toolStatus] already finds), then uses uv to install
-/// audio-separator and the model. An archive that holds two members is downloaded
+/// audio-separator, the model and yt-dlp. An archive that holds two members is downloaded
 /// once. The downloads folder is removed at the end, also after a failure.
 ///
 /// [downloads], [env], [extraDirs] and [client] exist for tests; by default the
@@ -530,5 +572,10 @@ Future<void> installTools(
     if (uv == null) throw StateError('uv is missing, cannot install audio-separator');
     await installSeparator(uv, d, os,
         ffmpeg: after['ffmpeg'], graphicsCard: graphicsCard, onLine: onLine);
+  }
+  if (after['yt-dlp'] == null) {
+    final uv = after['uv'];
+    if (uv == null) throw StateError('uv is missing, cannot install yt-dlp');
+    await installYtDlp(uv, d, os, arch, onLine: onLine);
   }
 }

@@ -725,6 +725,48 @@ chmod +x "$UV_TOOL_BIN_DIR/audio-separator"
       expect(lines[1], startsWith('sep PATH=/some/ffmpeg-dir:'));
     }, skip: noSh);
 
+    test('yt_dlp_extra_packages_per_host', () {
+      // deno on PyPI has wheels for these hosts only; Windows arm64 would build the sdist,
+      // which fails (bug km-zki), so it goes without deno there.
+      for (final key in toolDownloads.keys) {
+        final (os, arch) = (
+          HostOs.values.firstWhere((o) => key.startsWith('${o.name}-')),
+          HostArch.values.firstWhere((a) => key.endsWith('-${a.name}')),
+        );
+        expect(
+          ytDlpExtraPackagesFor(os, arch),
+          key == 'windows-arm64' ? isEmpty : [ytDlpJsRuntime],
+          reason: key,
+        );
+      }
+    });
+
+    test('install_yt_dlp_args_without_deno_on_windows_arm64', () async {
+      final uv = _script(tmp.path, 'uv', _fakeUv(log.path, checkEnv: true));
+      await installYtDlp(uv, tools, HostOs.windows, HostArch.arm64);
+      expect(log.readAsLinesSync(), [
+        'uv tool install --managed-python --python $pythonVersion yt-dlp[default]==$ytDlpVersion',
+      ]);
+    }, skip: noSh);
+
+    test('install_yt_dlp_args', () async {
+      final uv = _script(tmp.path, 'uv', _fakeUv(log.path, checkEnv: true));
+      await installYtDlp(uv, tools, HostOs.linux, HostArch.x64);
+      expect(log.readAsLinesSync(), [
+        'uv tool install --managed-python --python $pythonVersion '
+            '--with deno yt-dlp[default]==$ytDlpVersion',
+      ]);
+      expect(File('${tools.bin}/yt-dlp').existsSync(), isTrue);
+    }, skip: noSh);
+
+    test('install_yt_dlp_uv_failure', () async {
+      final uv = _script(tmp.path, 'uv', 'echo "no network" >&2; exit 2');
+      await expectLater(
+        installYtDlp(uv, tools, HostOs.linux, HostArch.x64),
+        throwsA(isA<ProcessFailure>()),
+      );
+    }, skip: noSh);
+
     test('install_separator_uv_failure', () async {
       final uv = _script(tmp.path, 'uv', 'echo "no network" >&2; exit 2');
       await expectLater(
@@ -751,6 +793,8 @@ chmod +x "$UV_TOOL_BIN_DIR/audio-separator"
     ToolPaths? res({List<String> extra = const []}) =>
         resolve(tools, HostOs.linux, const {'PATH': ''}, extraDirs: extra);
 
+    const needed = ['ffmpeg', 'ffprobe', 'audio-separator', 'yt-dlp'];
+
     test('tool_status_keys_and_missing', () {
       expect(status(), {
         'ffmpeg': null,
@@ -758,12 +802,43 @@ chmod +x "$UV_TOOL_BIN_DIR/audio-separator"
         'uv': null,
         'audio-separator': null,
         'model': null,
+        'yt-dlp': null,
       });
       expect(res(), isNull);
     });
 
-    test('resolve_graphics_card_only_on_windows', () {
+    test('tool_status_reports_yt_dlp', () {
+      touch(p.join(tools.bin, 'yt-dlp'));
+      expect(status()['yt-dlp'], samePath(p.join(tools.bin, 'yt-dlp')));
+      final win = toolStatus(tools, HostOs.windows, const {'PATH': ''}, extraDirs: const []);
+      expect(win['yt-dlp'], isNull, reason: 'Windows looks for yt-dlp.exe');
+      touch(p.join(tools.bin, 'yt-dlp.exe'));
+      expect(
+        toolStatus(tools, HostOs.windows, const {'PATH': ''}, extraDirs: const [])['yt-dlp'],
+        samePath(p.join(tools.bin, 'yt-dlp.exe')),
+      );
+    });
+
+    test('status_yt_dlp_only_from_tools_bin', () {
+      // The app needs its own yt-dlp, installed with deno.
+      final other = Directory(p.join(tmp.path, 'other'))..createSync();
+      touch(p.join(other.path, 'yt-dlp'));
+      final s = toolStatus(tools, HostOs.linux, {'PATH': other.path}, extraDirs: [other.path]);
+      expect(s['yt-dlp'], isNull);
+    });
+
+    test('resolve_needs_yt_dlp', () {
       for (final n in ['ffmpeg', 'ffprobe', 'audio-separator']) {
+        touch('${tools.bin}/$n');
+      }
+      touch('${tools.models}/$separatorModel');
+      expect(res(), isNull, reason: 'yt-dlp is missing');
+      touch(p.join(tools.bin, 'yt-dlp'));
+      expect(res()!.ytDlp, samePath(p.join(tools.bin, 'yt-dlp')));
+    });
+
+    test('resolve_graphics_card_only_on_windows', () {
+      for (final n in needed) {
         touch('${tools.bin}/$n');
         touch('${tools.bin}/$n.exe');
       }
@@ -777,7 +852,7 @@ chmod +x "$UV_TOOL_BIN_DIR/audio-separator"
     });
 
     test('resolve_present', () {
-      for (final n in ['ffmpeg', 'ffprobe', 'audio-separator']) {
+      for (final n in needed) {
         touch('${tools.bin}/$n');
       }
       touch('${tools.models}/$separatorModel');
@@ -785,11 +860,12 @@ chmod +x "$UV_TOOL_BIN_DIR/audio-separator"
       expect(r.ffmpeg, samePath('${tools.bin}/ffmpeg'));
       expect(r.ffprobe, samePath('${tools.bin}/ffprobe'));
       expect(r.separator, samePath('${tools.bin}/audio-separator'));
+      expect(r.ytDlp, samePath('${tools.bin}/yt-dlp'));
       expect(r.modelDir, tools.models);
     });
 
     test('resolve_requires_model', () {
-      for (final n in ['ffmpeg', 'ffprobe', 'audio-separator']) {
+      for (final n in needed) {
         touch('${tools.bin}/$n');
       }
       expect(res(), isNull);
@@ -798,7 +874,7 @@ chmod +x "$UV_TOOL_BIN_DIR/audio-separator"
     });
 
     test('resolve_does_not_need_uv', () {
-      for (final n in ['ffmpeg', 'ffprobe', 'audio-separator']) {
+      for (final n in needed) {
         touch('${tools.bin}/$n');
       }
       touch('${tools.models}/$separatorModel');
@@ -932,6 +1008,30 @@ chmod +x "$UV_TOOL_BIN_DIR/audio-separator"
       expect(server.hits['/b.tar.gz'], 1);
     }, skip: noSh);
 
+    test('install_tools_installs_yt_dlp_with_uv', () async {
+      await install();
+      expect(
+        log.readAsLinesSync(),
+        contains('uv tool install --managed-python --python $pythonVersion '
+            '--with deno yt-dlp[default]==$ytDlpVersion'),
+      );
+      expect(File(p.join(tools.bin, 'yt-dlp')).existsSync(), isTrue);
+    }, skip: noSh);
+
+    test('install_tools_adds_yt_dlp_to_an_older_install', () async {
+      // An install from before yt-dlp: everything but yt-dlp is there, uv included.
+      await install();
+      File(p.join(tools.bin, 'yt-dlp')).deleteSync();
+      final hits = Map.of(server.hits);
+      log.writeAsStringSync('');
+      await install();
+      expect(server.hits, hits, reason: 'nothing is downloaded again');
+      expect(log.readAsLinesSync(), [
+        'uv tool install --managed-python --python $pythonVersion '
+            '--with deno yt-dlp[default]==$ytDlpVersion',
+      ]);
+    }, skip: noSh);
+
     test('install_tools_skips_system_ffmpeg', () async {
       final sys = Directory('${tmp.path}/sys')..createSync();
       File('${sys.path}/ffmpeg').writeAsStringSync('s');
@@ -988,15 +1088,20 @@ String _script(String dir, String name, String body) {
   return file.path;
 }
 
-/// Body of a fake uv: logs its arguments and "installs" a fake audio-separator that
-/// logs its own arguments and creates the model file (argument 3) in the folder
-/// given as argument 5.
+/// Body of a fake uv: logs its arguments. Asked for yt-dlp it "installs" a fake yt-dlp;
+/// otherwise a fake audio-separator that logs its own arguments and creates the model
+/// file (argument 3) in the folder given as argument 5.
 String _fakeUv(String log, {bool checkEnv = false, String? pathFile}) =>
     r'''
 echo "uv $*" >> __LOG__
 __PATHLOG__
 __CHECK__
 mkdir -p "$UV_TOOL_BIN_DIR"
+case "$*" in *yt-dlp*)
+  printf '#!/bin/sh\n' > "$UV_TOOL_BIN_DIR/yt-dlp"
+  chmod +x "$UV_TOOL_BIN_DIR/yt-dlp"
+  exit 0;;
+esac
 cat > "$UV_TOOL_BIN_DIR/audio-separator" <<'EOS'
 #!/bin/sh
 echo "sep $*" >> __LOG__

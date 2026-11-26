@@ -9,6 +9,29 @@ import 'package:kantahe_maker/tools.dart';
 import 'support/process.dart';
 
 void main() {
+  test('check_page_detection', () {
+    expect(looksLikeCheckPage('Just a moment...', ''), isTrue);
+    expect(looksLikeCheckPage('Some site', 'Please Verify you are human first'), isTrue);
+    expect(looksLikeCheckPage('x', 'Checking your browser before accessing'), isTrue);
+    expect(looksLikeCheckPage('x', 'Solve the CAPTCHA'), isTrue);
+    expect(looksLikeCheckPage('Some site', 'Download'), isFalse);
+  });
+
+  test('browser_launch_modes', () {
+    void mode(bool headless, bool forUser, bool wantHeadless, List<String> wantArgs) {
+      final m = browserLaunch(headless: headless, forUser: forUser);
+      expect(m.headless, wantHeadless, reason: 'headless $headless forUser $forUser');
+      expect(m.args, wantArgs, reason: 'headless $headless forUser $forUser');
+    }
+
+    // A check the user must do: a normal window in front, whatever else is asked.
+    mode(false, true, false, []);
+    mode(true, true, false, []);
+    // Tests: no window. The real thing: a minimized window (sites may refuse headless).
+    mode(true, false, true, []);
+    mode(false, false, false, ['--start-minimized']);
+  });
+
   group('browserCandidates', () {
     test('candidates_macos', () {
       expect(browserCandidates(HostOs.macos, {'HOME': '/data/someone'}), [

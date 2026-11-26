@@ -43,6 +43,18 @@ const separatorModel = 'UVR-MDX-NET-Inst_HQ_3.onnx';
 /// crashes with ModuleNotFoundError without it (found by installing it by hand).
 const separatorExtraPackages = <String>['audioread'];
 
+/// https://pypi.org/project/yt-dlp/ (checked 2026-11-26). Unlicense. Installed with uv like
+/// audio-separator. YouTube changes often and an old yt-dlp stops working: bump this (and
+/// the date) to the newest release from https://pypi.org/pypi/yt-dlp/json when downloads fail.
+const ytDlpVersion = '2026.11.23';
+
+/// The JavaScript runtime installed with yt-dlp (uv's --with). Without one yt-dlp warns that
+/// YouTube extraction is deprecated and formats may be missing; deno from PyPI is found by the
+/// installed yt-dlp by itself (tried on 2026-11-26). PyPI's deno 2.9.8 has wheels for macOS
+/// x64/arm64, Linux x64/arm64 (glibc 2.27+) and Windows x64 only: Windows arm64 goes without
+/// it (see ytDlpExtraPackagesFor in tools.dart).
+const ytDlpJsRuntime = 'deno';
+
 const _uv = 'https://github.com/astral-sh/uv/releases/download/$uvVersion';
 // BtbN deletes its dated "autobuild-..." tags after about two weeks, so a pinned dated tag
 // ends in HTTP 404 (it did on 2026-11-14). The stable "latest" release keeps the same file
@@ -103,6 +115,7 @@ const Map<String, String> toolLicenses = {
   'audio-separator': 'MIT',
   'UVR model':
       'UVR project is MIT; the weights (github.com/TRvlvr/model_repo) state no license',
+  'yt-dlp': 'Unlicense',
 };
 
 /// Approximate download sizes in MB, measured on 2026-10-30: ffmpeg+ffprobe are
@@ -110,11 +123,12 @@ const Map<String, String> toolLicenses = {
 /// Python 70 MB plus the wheels (torch, numpy, ...) about 1.1 GB; the model 64 MB. The
 /// graphics card option (Windows, DirectML: torch 2.4.1 and the DirectML packages instead of
 /// the processor ones) makes the tools folder 650 MB bigger (measured 2026-11-03: 982 MB
-/// -> 1636 MB).
+/// -> 1636 MB). yt-dlp with deno: about 45 MB (deno 40 MB, yt-dlp 3 MB, measured 2026-11-26).
 const Map<String, int> approxSizeMb = {
   'ffmpeg': 190,
   'uv': 15,
   'python+audio-separator': 1100,
   'model': 64,
   'graphics card': 650,
+  'yt-dlp': 45,
 };

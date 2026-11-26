@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kantahe_maker/ai_timing.dart';
 import 'package:kantahe_maker/screens/settings_screen.dart';
