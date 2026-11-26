@@ -972,8 +972,9 @@ chmod +x "$UV_TOOL_BIN_DIR/audio-separator"
 
     test('install_tools_puts_the_ffmpeg_folder_on_the_path_of_uv', () async {
       await install();
+      // uv runs twice: audio-separator first (it needs ffmpeg), then yt-dlp.
       expect(
-        File('${tmp.path}/uv-path.txt').readAsStringSync(),
+        File('${tmp.path}/uv-path.txt').readAsLinesSync().first,
         startsWith('${tools.bin}:'),
         reason: 'the downloaded ffmpeg is in the tools folder',
       );
@@ -1111,7 +1112,7 @@ EOS
 chmod +x "$UV_TOOL_BIN_DIR/audio-separator"
 '''
         .replaceAll('__LOG__', log)
-        .replaceAll('__PATHLOG__', pathFile == null ? '' : 'echo "\$PATH" > $pathFile')
+        .replaceAll('__PATHLOG__', pathFile == null ? '' : 'echo "\$PATH" >> $pathFile')
         .replaceAll(
           '__CHECK__',
           checkEnv
